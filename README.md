@@ -158,3 +158,56 @@ tolerations: # this toleration is to have the daemonset runnable on master nodes
 Параметр добавлен в node-exporter-daemonset.yaml
 
 </details>
+
+<details>
+<summary>Домашнее задание к лекции №4 (Безопасность и управление доступом)
+</summary>
+
+### Задание:
+
+- Изучено https://kubernetes.io/docs/reference/access-authn-authz/rbac/
+- сделаны задания:
+
+#### Задание №1
+- Создать Service Account bob, дать ему роль admin в рамках всего кластера
+- Создать Service Account dave без доступа к кластеру
+
+#### Задание №2
+- Создать Namespace prometheus
+- Создать Service Account carol в этом Namespace
+- Дать всем Service Account в Namespace prometheus возможность делать get, list, watch в отношении Pods всего кластера
+
+#### Задание №3
+- Создать Namespace dev
+- Создать Service Account jane в Namespace dev
+- Дать jane роль admin в рамках Namespace dev
+- Создать Service Account ken в Namespace dev
+- Дать ken роль view в рамках Namespace dev
+
+#### Шпаргалка:
+- ClusterRole не принадлежит ни одному namespace
+- ClusterRole - роль на весь кластер
+- Role - роль только на неймспейс
+- И с ролями надо внимательно - могут существовать одноименные роли на кластер и в неймспейсе
+- FAQ по биндингу:
+
+```
+apiVersion: rbac.authorization.k8s.io/v1
+# Этот биндинг дает ползователю "jane" роль pod-reader  в "default" неймспейсе
+# Роль  "pod-reader" должна в этом неймспейсе существовать.
+kind: RoleBinding
+metadata:
+  name: read-pods    # придумываем название биндингу
+  namespace: default # создаем биндинг именно в default
+subjects:            # кому даем права
+                     # можно указать нескользо "subject"
+- kind: User
+  name: jane         # имя пользователя регистрозависимое
+  apiGroup: rbac.authorization.k8s.io
+roleRef:             # указываем одну роль которую дадим верхним пользователям или сервисаккаунтам
+  kind: Role         # либо  Role, либо ClusterRole
+  name: pod-reader   # должно быть имя существующей Role или ClusterRole
+  apiGroup: rbac.authorization.k8s.io
+```
+
+</details>

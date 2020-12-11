@@ -1,0 +1,23 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: global-cluster-pods-reader
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus-global-cluster-pods-reader-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: global-cluster-pods-reader
+subjects:
+- kind: Group
+  name: system:serviceaccounts:prometheus # get all serviceaccounts in namespace prometheus see https://kubernetes.io/docs/reference/access-authn-authz/rbac/
+  namespace: prometheus
