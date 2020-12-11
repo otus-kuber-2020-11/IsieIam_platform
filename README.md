@@ -154,4 +154,7 @@ tolerations: # this toleration is to have the daemonset runnable on master nodes
   - key: node-role.kubernetes.io/master
     effect: NoSchedule
 ```
+
+Параметр добавлен в node-exporter-daemonset.yaml
+
 </details>
