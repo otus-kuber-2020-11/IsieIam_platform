@@ -87,3 +87,74 @@ panic: environment variable "PRODUCT_CATALOG_SERVICE_ADDR" not set
 Создан frontend-pod-healthy.yaml - в результате под запускается - все ок.
 
 </details>
+
+<details>
+<summary>Домашнее задание к лекции №3 (Механика запуска и взаимодействия контейнеров в Kubernetes)
+</summary>
+
+### Задание:
+- Развернут кластер через kind
+- Проверено создание на практике replica-set
+- Проверена на практике работа с deployment
+- Проверено на практике использование probes
+- Развернут node-exporter через daemonset на всех нодах кластера, включая master
+
+> Руководствуясь материалами лекции опишите произошедшую ситуацию, почему обновление ReplicaSet не повлекло обновление запущенных pod? 
+
+ответ из лекции: потому что ReplicationController "НЕ проверяет соответствие запущенных Podов шаблону"
+
+- Вспомогательные команды:
+
+```
+- получить поды по метке:
+kubectl get pods -l app=frontend
+- получить реплики:
+kubectl get rs
+- масштабирование реплики
+kubectl scale replicaset frontend --replicas=3
+- отследить развертывание реплики по метке:
+kubectl apply -f frontend-replicaset.yaml | kubectl get pods -l app=frontend -w
+- откат deployment-a:
+kubectl rollout undo deployment paymentservice --to-revision=1 | kubectl get rs -l app=paymentservice -w
+```
+
+### Задание со * №1:
+
+> С использованием параметров maxSurge и maxUnavailable самостоятельно реализуйте два следующих сценария развертывания:
+
+```
+Аналог blue-green:
+1. Развертывание трех новых pod
+2. Удаление трех старых pod
+Reverse Rolling Update:
+1. Удаление одного старого pod
+2. Создание одного нового pod
+```
+
+Созданы:
+- paymentservice-deployment-bg.yaml
+- paymentservice-deployment-reverse.yaml
+
+### Задание со * №2:
+
+> Найдите в интернете или напишите самостоятельно манифест node-exporter-daemonset.yaml для развертывания DaemonSet с Node Exporter
+
+- в инете найдено здесь https://github.com/shevyf/prom_on_k8s_howto/blob/master/node-exporter-daemonset.yml
+- актуализировано под текущую версию api и убраны некоторые навороты - см node-exporter-daemonset.yaml
+- метрики собираются
+
+### Задание со **:
+
+>Найдите способ модернизировать свой DaemonSet таким образом, чтобы Node Exporter был развернут как на master, так и на worker нодах (конфигурацию самих нод изменять нельзя)
+
+Пример можно найти в мануале: https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/
+
+```
+tolerations: # this toleration is to have the daemonset runnable on master nodes remove it if your masters can't run pods
+  - key: node-role.kubernetes.io/master
+    effect: NoSchedule
+```
+
+Параметр добавлен в node-exporter-daemonset.yaml
+
+</details>
