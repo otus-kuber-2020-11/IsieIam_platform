@@ -268,8 +268,10 @@ Grep: the grep manual at the exit status section report: EXIT STATUS The exit st
 > 3. Полученные манифесты положите в подкаталог ./coredns
 
 Релизовано, см ./kubernetes-network/ext-coredns-svc.yaml
-Правда есть момент - сам сервис позволяет резолвить как имена так и обратный просмотр, но что интересно, у меня имена резолвились только в виде <ip>.web.default.cluster.local, почему они так генерились непонятно.
-Подсказка см https://metallb.universe.tf/usage/#ip-address-sharing
+
+Правда есть момент - сам сервис позволяет резолвить как имена так и обратный просмотр, но что интересно, у меня имена резолвились только в виде ip_address.web.default.cluster.local, почему они так генерились непонятно.
+
+Подсказка: см https://metallb.universe.tf/usage/#ip-address-sharing
 
 ### Задание со * №2: Ingress для Dashboard
 
@@ -285,6 +287,7 @@ kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.1.0/a
 ```
 
 Написан манифест: ./kubernetes-network/dashboard/dashboard-ingress.yaml Проверена работоспособность - все ок.
+
 Для выковыривания токена можно использовать, подставив нужное имя пода: 
 
 ```
@@ -298,7 +301,9 @@ kubectl describe secret kubernetes-dashboard-token-t5qnb -n kubernetes-dashboard
 > Написанные манифесты положите в подкаталог ./canary
 
 В каталоге ./kubernetes-network/canary созданы два типа файлов: deployment, service, ingress для main приложения и для canary.
+
 Выполняем kubectl apply -f ./ в каталоге canary. В реузльтате получаем два приложения.
+
 Основной интерес представляе web-ingress-canary.yaml - в нем задаются основные параметры канарейки:
 
 ```
@@ -310,5 +315,14 @@ kubectl describe secret kubernetes-dashboard-token-t5qnb -n kubernetes-dashboard
 
 Подробности по настройке можно найти тут: https://github.com/kubernetes/ingress-nginx/blob/master/docs/user-guide/nginx-configuration/annotations.md#canary
 
+### Доп инфо:
+
+- на 20 версии кубера и докера заработало minikube ssh
+- для запуска minikube: minikube start --vm-driver=docker  (причем по дефолту теперь оно запускается с vm в виде docker)
+- Остановка: minikube stop
+- Удаление кластера: minikube delete
+- Установка дашборда: minikube dashboard
+- Установка ингресса: minikube addons enable ingress
+- Получение адреса minikube: minikube ip
 
 </details>
