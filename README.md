@@ -328,3 +328,39 @@ kubectl describe secret kubernetes-dashboard-token-t5qnb -n kubernetes-dashboard
 - Получение адреса minikube: minikube ip
 
 </details>
+
+<details>
+<summary>Домашнее задание к лекции №6 (Хранение данных в Kubernetes: Volumes, Storages, Statefull-приложения)
+</summary>
+
+### Задание:
+
+- Запущен кластен через kind
+- Установлен MinIO (https://min.io) statefulset и service с использованием их манифестов:
+
+```
+kubectl apply -f https://raw.githubusercontent.com/express42/otus-platformsnippets/master/Module-02/Kuberenetes-volumes/minio-statefulset.yaml
+kubectl apply -f https://raw.githubusercontent.com/express42/otus-platformsnippets/master/Module-02/Kuberenetes-volumes/minio-headless-service.yaml
+```
+
+- Манифесты сохранены в каталог: ./kubernetes-volumes
+- Замучаны pv и pvc в разных способах создания и удаления, а также применения политик.
+- Изучено как это хранится на диске с учетом stadard плагина kind и minikube
+- Для запуска minio можно использовать: kubectl port-forward statefulsets/minio 9000:9000
+- Опробовано использование самого minio
+- На будущее есть некая то ли фича, то ли баг(по крайней мере офф документации k8s поведение явно противоречит, то это же плагин :) ):
+
+>Интересный момент поймал на kind(да и minikube также ведет себя) с volume(домашка с minio): 
+>если попытаться удалить PV(policy deleted) при существующем PVC, PV перейдет в terminated 
+>как описано например тут https://kubernetes.io/docs/concepts/storage/persistent-volumes/#storage-object-in-use-protection), 
+>но когда удалить PVC после этого, PV удалится, но данные по факту останутся в каталоге докера(в volumes) несмотря на политику. 
+>Если же удалить изначально PVC, то и PV и данные удалятся(считаем что сам ss minio во всех случаях уже убит).  
+
+### Задание со *
+
+>В конфигурации нашего StatefulSet данные указаны в открытом виде, что не безопасно.
+> Поместите данные в и настройте конфигурацию на их использование.
+
+Написан манифест для secret. Сами secret закодированы base64. В существующие манифест statefulset добавлено использование secret.
+
+</details>
