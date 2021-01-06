@@ -403,7 +403,7 @@ helm install cert-manager jetstack/cert-manager --namespace cert-manager --versi
 https://habr.com/ru/company/flant/blog/496936/
 ```
 
-- Установлены clusterissures для автоматической выдачи сертификатов используя let's encrypt - см kubernetes-templating/cert-manager. Один файл для прода(реальный сертфиикат), второй для stage(фейковый сертификат от LE)
+- Установлены clusterissures для автоматической выдачи сертификатов используя let's encrypt - см kubernetes-templating/cert-manager. Один файл для прода(реальный сертификат), второй для stage(фейковый сертификат от LE)
 
 ```
 Для использования потом в ингрессе этих issuer необходимо добавить аннотации и секрет - как на примере ниже(в секрет поместится полученный сертификат):
@@ -467,7 +467,7 @@ helm upgrade --install reddit my-chartmuseum/reddit
 
 - Добавляем репо: helm repo add harbor https://helm.goharbor.io
 - Создаем namespace: kubectl create ns harbor
-- Устанавливаем, перед жтим подготовив кастомные переменные:
+- Устанавливаем, перед этим подготовив кастомные переменные:
 
 ```
 helm upgrade --install harbor harbor/harbor --wait \
@@ -476,7 +476,7 @@ helm upgrade --install harbor harbor/harbor --wait \
 ```
 
 - Реквизиты по умолчанию - admin/Harbor12345
-- Был какой непонятный глюк что сервис не пускал себя с паролем при включенном tls спустя неделю при тех же настройках все запустилось.
+- Был какой непонятный глюк что сервис не пускал себя с паролем при включенном tls, спустя неделю при тех же настройках все запустилось.
 
 ### Задание со * №2: Используем helmfile
 
@@ -493,6 +493,7 @@ helm upgrade --install harbor harbor/harbor --wait \
 - создан helm-chart для hipster-shop, запущен, работает(для gcp чтобы пробросить nodeport - надо зайти в gui найти сервис и там будет команда для forwarding).
 - вынесен frontend в отдельный чарт - проверена работоспособность через  ingress - все ок.
 - параметризован чарт frontend и добавлен в зависимости к основному чарту hipster-shop (не забываем, что из чарта HS фронтенд удален)
+- Шпаргалка:
 
 ```
 # создаем namespace для магазина:
@@ -513,12 +514,18 @@ helm delete frontend --namespace hipster-shop
 
 - Вынесен redis из чарта hipster-shop и переведен на community чарт - в файле chart.yaml указана зависимость на внешний чарт с redis.
 - добавлены доп переменные для redis(для упрощения запуска) и для сервиса cartservice(параметризован адрес redis) - см kubernetes-templating/hipster-shop/values.yaml
-- удален deployment и sertice от redis из основного файла hipster-shop
+- удален deployment и service от redis из основного файла hipster-shop
 - проверена работоспособность - все ок.
 
 ### Необязательное задание: Работа с helm-secrets
 
-плагин переехал на новое место, то ставим плагин для секретов: helm plugin install https://github.com/jkroepke/helm-secrets
+плагин переехал на новое место, то ставим плагин для секретов: 
+
+```
+helm plugin install https://github.com/jkroepke/helm-secrets
+```
+
+Инструкция по подготовке и шифрованию секретов:
 
 ```
 генерим ключ:
@@ -531,7 +538,7 @@ sops -e -i --pgp 22CF5819B008C76172A3E90E9AD1DCB723941D38 secrets.yaml
 helm secrets view secrets.yaml
 # sops
 sops -d secrets.yaml
-и нужно будет ввести пароль закрытого ключа
+и нужно будет ввести пароль закрытого ключа.
 ```
 
 использование:
@@ -550,7 +557,7 @@ hipster-shop \
 - Далее как с музеем:
 
 ```
-# добавляем репо (дублирую sh, чтобы не искать), кстати харбор хочет авторизацию и chartrepo обязательный путь после имени хоста
+# добавляем репо (дублирую sh, чтобы не искать), кстати в отличие от музея - харбор хочет авторизацию и chartrepo обязательный путь после имени хоста
 helm repo add templating --username=admin --password=Harbor12345 https://harbor.35.192.45.27.nip.io/chartrepo
 helm push hipster-shop/ templating
 helm push frontend/ templating
@@ -564,7 +571,8 @@ helm search repo hipster-shop
 - вынесены из основного чарта hipster-shop длва сервиса: paymentservice и shippingservice (deployment и service)
 - создан services.jsonnet шаблон для генерации компонентов двух сервисов
 - чем хорош jsonnet - им удобно генерить компоненты большого множества почти одинаковых сервисов, во всех остальных случаях это боль - достаточно посмотреть на файл.
-- kubecfg/jsonnet очень сильно зависят от версии k8s и соответствующего ей версии библиотеки libsonnet - если не сходятся - можно легво нарваться на несовместимость версий сущностей k8s.
+- kubecfg/jsonnet очень сильно зависят от версии k8s и соответствующего ей версии библиотеки libsonnet - если не сходятся - можно легко нарваться на несовместимость версий сущностей k8s.
+- библиотека libsonnet взята с какой-то ветки и положена локально, т.к. удаленно не скачивалось.
 - для проверки указанных шаблонов: kubecfg show services.jsonnet
 - для установки: kubecfg update services.jsonnet --namespace hipster-shop
 
