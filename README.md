@@ -364,3 +364,226 @@ kubectl apply -f https://raw.githubusercontent.com/express42/otus-platformsnippe
 Написан манифест для secret. Сами secret закодированы base64. В существующие манифест statefulset добавлено использование secret.
 
 </details>
+
+
+<details>
+<summary>Домашнее задание к лекции №7 (Шаблонизация манифестов. Helm и его аналоги (Jsonnet, Kustomize))
+</summary>
+
+### Задание:
+
+- В этом задании есть небольшая инструкция по google cloud platform.(само облако осталось с прошлого курса)
+- Создан k8s в GCP
+- Обновлен helm3 до актуальной версии.
+
+```
+т.к. часть версий helm чартов из старого репа, то обзовем:
+старые: helm repo add stable-old https://charts.helm.sh/stable
+новые:  helm repo add stable https://kubernetes-charts.storage.googleapis.com
+```
+
+- Установлен nginx ingress через helm:
+
+```
+kubectl create ns nginx-ingress
+helm upgrade --install nginx-ingress stable-old/nginx-ingress --wait \
+ --namespace=nginx-ingress \
+ --version=1.41.3
+```
+
+- Установлен cert manager через helm:
+
+```
+kubectl create namespace cert-manager
+# ставим дополнения:
+kubectl apply -f https://github.com/jetstack/cert-manager/releases/download/v1.1.0/cert-manager.crds.yaml -n cert-manager
+# ставим сам менеджер
+helm install cert-manager jetstack/cert-manager --namespace cert-manager --version v1.1.0
+# доп инфо:
+https://habr.com/ru/company/flant/blog/496936/
+```
+
+- Установлены clusterissures для автоматической выдачи сертификатов используя let's encrypt - см kubernetes-templating/cert-manager. Один файл для прода(реальный сертфиикат), второй для stage(фейковый сертификат от LE)
+
+```
+Для использования потом в ингрессе этих issuer необходимо добавить аннотации и секрет - как на примере ниже(в секрет поместится полученный сертификат):
+  tls:
+    enabled: true
+    secretName: "harbor.35.192.45.27.nip.io"
+    #secretName: ""
+  ingress:
+    hosts:
+      core: harbor.35.192.45.27.nip.io
+    annotations:
+      kubernetes.io/ingress.class: nginx
+      kubernetes.io/tls-acme: "true"
+      cert-manager.io/cluster-issuer: "letsencrypt-production"
+      cert-manager.io/acme-challenge-type: http01
+```
+
+- Установлен chartmuseum, на нем проверена корректная выдача сертификата - все ок.
+
+```
+kubectl create ns chartmuseum
+helm upgrade --install chartmuseum stable-old/chartmuseum --wait \
+ --namespace=chartmuseum \
+ --version=2.13.2 \
+ -f kubernetes-templating/chartmuseum/values.yaml
+
+helm ls -n chartmuseum
+```
+
+### Задание со * №1: chartmuseum
+
+>Научитесь работать с chartmuseum
+>Опишите в PR последовательность действий, необходимых для добавления туда helm chart's и их установки с использованием chartmuseum как репозитория
+
+Набор команд для использования chartmuseum ниже, вспомогательные ссылки: 
+- https://chartmuseum.com/docs/#uploading-a-chart-package
+- https://stackoverflow.com/questions/48577211/fail-to-upload-chart-to-chartmuseum
+
+Тренироваться будем на чартах реддита с прошлых заданий:
+
+```
+# Для начала ставим плагин позволяющий пушить в какой-либо хелм репо:
+helm plugin install https://github.com/chartmuseum/helm-push.git
+# создаем пакет чарта (на выходе получим архив такой же как и при сборе зависимостей)
+helm package .
+# добавляем музей как репо для хелма:
+helm repo add my-chartmuseum https://chartmuseum.34.68.65.51.nip.io
+# пушим
+helm push reddit/ my-chartmuseum
+# обновляем:
+helm repo update
+# проверяем:
+helm search repo reddit
+NAME                 	CHART VERSION	APP VERSION	DESCRIPTION                   
+my-chartmuseum/reddit	0.1.0        	           	OTUS sample reddit application
+# и при необходимости можно поставить:
+helm upgrade --install reddit my-chartmuseum/reddit
+```
+
+### Самостоятельное задание  №1: harbor
+
+- Добавляем репо: helm repo add harbor https://helm.goharbor.io
+- Создаем namespace: kubectl create ns harbor
+- Устанавливаем, перед жтим подготовив кастомные переменные:
+
+```
+helm upgrade --install harbor harbor/harbor --wait \
+ --namespace=harbor \
+ -f kubernetes-templating/harbor/values.yaml
+```
+
+- Реквизиты по умолчанию - admin/Harbor12345
+- Был какой непонятный глюк что сервис не пускал себя с паролем при включенном tls спустя неделю при тех же настройках все запустилось.
+
+### Задание со * №2: Используем helmfile
+
+> Опишите установку nginx-ingress, cert-manager и harbor в helmfile
+> Приложите получившийся helmfile.yaml и другие файлы (при их наличии) в директорию kubernetes-templating/helmfile
+
+- Написан файл: kubernetes-templating/helmfile/helmfile.yaml
+- Для установки богатства из файла достаточно использовать helmfile sync в каталоге с файлом, единственно потом придется запустить повторно проставив корректный ext-ip ингресса(т.к. используется внешний сервис для генерации dns по ip).
+- Есть момент: если существуют какие-то одноименные ресурсы оно выдаст ошибку и не поставится (например crd от cred-manager), но это справедливо и для любой установки любого чарта к существующим ресурсам в k8s.
+
+
+### Задание: Создаем свой helm chart
+
+- создан helm-chart для hipster-shop, запущен, работает(для gcp чтобы пробросить nodeport - надо зайти в gui найти сервис и там будет команда для forwarding).
+- вынесен frontend в отдельный чарт - проверена работоспособность через  ingress - все ок.
+- параметризован чарт frontend и добавлен в зависимости к основному чарту hipster-shop (не забываем, что из чарта HS фронтенд удален)
+
+```
+# создаем namespace для магазина:
+kubectl create ns hipster-shop
+# основная команда helm для разворачивания:
+helm upgrade --install hipster-shop kubernetes-templating/hipster-shop --namespace hipster-shop
+# обновить зависимости для чарта:
+helm dep update kubernetes-templating/hipster-shop
+# ставим чарт с переопределением входных значений (в данном случае они же и являются дефолтными :))
+helm upgrade --install frontend kubernetes-templating/frontend --namespace hipster-shop -f kubernetes-templating/frontend/values.yaml
+# удалить релиз:
+helm delete frontend --namespace hipster-shop
+```
+
+### Задание со * №3: 
+
+>Выберите сервисы, которые можно установить как зависимости, используя community chart's. Например, это может быть Redis.
+
+- Вынесен redis из чарта hipster-shop и переведен на community чарт - в файле chart.yaml указана зависимость на внешний чарт с redis.
+- добавлены доп переменные для redis(для упрощения запуска) и для сервиса cartservice(параметризован адрес redis) - см kubernetes-templating/hipster-shop/values.yaml
+- удален deployment и sertice от redis из основного файла hipster-shop
+- проверена работоспособность - все ок.
+
+### Необязательное задание: Работа с helm-secrets
+
+плагин переехал на новое место, то ставим плагин для секретов: helm plugin install https://github.com/jkroepke/helm-secrets
+
+```
+генерим ключ:
+gpg --full-generate-key
+спросит пароль на закрытый и будет храиться где-то в домашнем каталоге - путь будет в выводе, как и имя ключа (много-много символов)
+Для зашифровки:
+sops -e -i --pgp 22CF5819B008C76172A3E90E9AD1DCB723941D38 secrets.yaml
+Для расшифровки:
+# helm secrets
+helm secrets view secrets.yaml
+# sops
+sops -d secrets.yaml
+и нужно будет ввести пароль закрытого ключа
+```
+
+использование:
+
+```
+helm secrets upgrade --install frontend kubernetes-templating/frontend --namespace
+hipster-shop \
+ -f kubernetes-templating/frontend/values.yaml \
+ -f kubernetes-templating/frontend/secrets.yaml
+```
+
+### Проверка: залить все чарты в harbor
+
+- Мануал по подключению harbor как чарт репо: https://goharbor.io/docs/1.10/working-with-projects/working-with-images/managing-helm-charts/
+- создан kubernetes-templating/repo.sh для добавления репо харбора.
+- Далее как с музеем:
+
+```
+# добавляем репо (дублирую sh, чтобы не искать), кстати харбор хочет авторизацию и chartrepo обязательный путь после имени хоста
+helm repo add templating --username=admin --password=Harbor12345 https://harbor.35.192.45.27.nip.io/chartrepo
+helm push hipster-shop/ templating
+helm push frontend/ templating
+helm repo update
+helm search repo hipster-shop
+```
+
+### Задание: kubecfg
+
+- установлен kubecfg
+- вынесены из основного чарта hipster-shop длва сервиса: paymentservice и shippingservice (deployment и service)
+- создан services.jsonnet шаблон для генерации компонентов двух сервисов
+- чем хорош jsonnet - им удобно генерить компоненты большого множества почти одинаковых сервисов, во всех остальных случаях это боль - достаточно посмотреть на файл.
+- kubecfg/jsonnet очень сильно зависят от версии k8s и соответствующего ей версии библиотеки libsonnet - если не сходятся - можно легво нарваться на несовместимость версий сущностей k8s.
+- для проверки указанных шаблонов: kubecfg show services.jsonnet
+- для установки: kubecfg update services.jsonnet --namespace hipster-shop
+
+### Задание со * №4:
+
+>Выберите еще один микросервис из состава hipster-shop и попробуйте использовать другое решение на основе jsonnet, например Kapitan или qbec.
+
+Не делал.
+
+### Самостоятельное задание  №2: Kustomize
+
+>Отпилите еще один (любой) микросервис из all-hipstershop.yaml.yaml и самостоятельно займитесь его kustomизацией.
+
+- отпилен recommendationservice
+- созданы yaml для kusomize: kubernetes-templating/kustomize base и override
+- в override сделаны две кастомизации: dev и prod 
+- dev - по сути является недостающим кусочком для текущей установки hipster-shop. Для установки: kubectl apply -k kubernetes-templating/kustomize/overrides/dev
+- prod отличается namespace, label и префиксом
+- для просмотра результатов кастомизированных yaml: kubectl kustomize overrides/dev
+- доп инфо можно найти тут: https://kubectl.docs.kubernetes.io/references/kustomize/
+
+</details>
