@@ -745,7 +745,7 @@ http://grafana.mydomain.com
 - для установки nginx и nginx-prometheus-exporter можно использовать kubectl apply -f . в каталоге kubernetes-monitoring/
 - С репа nginx-prometheus-exporter взят дашборд для графаны: https://github.com/nginxinc/nginx-prometheus-exporter/tree/master/grafana
 - Выглядит оно след образом:
-![nginx exporter dashboard](./kubernetes-monitoring/grafana_2021-01-07_18-42-39.png)
+![nginx exporter dashboard](./kubernetes-monitoring/screen/grafana_2021-01-07_18-42-39.png)
 
 </details>
 
