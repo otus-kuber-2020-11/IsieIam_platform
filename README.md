@@ -705,3 +705,47 @@ minikube start --vm-driver=docker --kubernetes-version=v1.16.1
 
 
 </details>
+
+<details>
+<summary>Домашнее задание к лекции №9 (Мониторинг компонентов кластера и приложений, работающих в нем)
+</summary>
+
+### Задание:
+
+- Выбран 4 уровень :) (Can i play, daddy?), т.к. лучше в Wolfenstein на death incarnate, чем в k8s :D
+- взят актуальный чарт уже kube-prometheus-stack: https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack
+- актуализированы values (kubernetes-monitoring/kube-prometheus-stack): включены ingress, настроены хосты для alertmanager, prometheus, grafana на mydomain.com
+- ключевой момент, подсмотренный в лекции: необходимо поставить переменную serviceMonitorSelectorNilUsesHelmValues: false  иначе prom будет смотреть только те servicemonitor, у которых есть label поставленные от релиза helm.
+- задеплоен чарт prom-a в кластер (в качестве k8s был взят minikube)
+
+```
+# шпаргалка по minikube
+minikube start --vm-driver=docker
+minikube addons enable ingress
+minikube stop
+minikube delete
+
+# установка прома:
+helm upgrade --install prometheus prometheus-community/kube-prometheus-stack -f kubernetes-monitoring/kube-prometheus-stack/values.yaml
+```
+
+- взят с первой ДЗ nginx, добавлен в конфиг параметр для его статуса, сбилжен образ isieiam/nginx-test:2.0
+- взяты deployment, service, ingress с предыдущей ДЗ с canary для деплоя nginx из пункта выше.
+- для доступа в локальный hosts прописаны имена хостов из ингресса и сервисы доступны по адресам:
+
+```
+http://prometheus.mydomain.com
+http://alertmanager.mydomain.com
+http://grafana.mydomain.com
+сайт на nginx c логотипом otus: http://ingress.local
+страница статуса nginx:         http://ingress.local/basic_status
+```
+- написаны deployment, service и service monitor для nginx prometheus exporter (доп инфо: https://github.com/nginxinc/nginx-prometheus-exporter)
+- что делает exporter - у него параметром указан адрес сервиса nginx и он с nginx-вой страницы со статусом берет метрики и выдает прому в удобоваримом виде.
+- для установки nginx и nginx-prometheus-exporter можно использовать kubectl apply -f . в каталоге kubernetes-monitoring/
+- С репа nginx-prometheus-exporter взят дашборд для графаны: https://github.com/nginxinc/nginx-prometheus-exporter/tree/master/grafana
+- Выглядит оно след образом:
+![nginx exporter dashboard](./kubernetes-monitoring/grafana_2021-01-07_18-42-39.png)
+
+</details>
+
