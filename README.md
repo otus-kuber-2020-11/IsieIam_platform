@@ -595,3 +595,113 @@ helm search repo hipster-shop
 - доп инфо можно найти тут: https://kubectl.docs.kubernetes.io/references/kustomize/
 
 </details>
+
+<details>
+<summary>Домашнее задание к лекции №8 (Custom Resource Definitions. Operators)
+</summary>
+
+### Задание:
+
+- Написаны CustomResource и CustomResourceDefinition для mysql оператора
+- В crd добавлено описание обязательных полей.
+- Внимание, для 20 версии k8s формат crd в kubernetes-operators/deploy/crd.yaml уже deprecated и например validation в таком виде не работает. Рядом лежит crd16.yml, который работает корректно.
+- Написана часть логики mysql оператора при помощи python KOPF (каталог kubernetes-operators/build) (кратко за логику отвечает py скрипт, который в рядом лежащие шаблоны подставляет значения от cr)
+- Применены crd, запущен оператор/применены его манифесты из deploy каталога/ применер CR (в deploy/deploy-operator.yml указать нужный образ с оператором)
+- Есть два варианта запуска, первый дебажный через явный локальный запуск оператора и второй честный с использованием докер образа с оператором.
+- Для проверки в дебажном режиме:
+
+```
+# применяем crd
+kubectl apply -f deploy/crd.yml
+# запускаем оператор в каталоге build (для работы не забыть pip3 install kopf/kubernetes)
+kopf run mysql-operator.py
+# скрипт запустится и в консольке будут его логи
+# далее применяем cr
+kubectl apply -f deploy/cr.yml
+```
+
+- Для проверки по-честному:
+
+```
+# применяем crd
+kubectl apply -f deploy/crd.yml
+# проставляем нужный образ (isieiam/mysql-operator:1.0 или готовый из ДЗ) и применяем соответствующие манифесты:
+kubectl apply -f deploy/service-account.yml
+kubectl apply -f deploy/role.yml
+kubectl apply -f deploy/role-binding.yml
+kubectl apply -f deploy/deploy-operator.yml
+
+# далее применяем cr
+kubectl apply -f deploy/cr.yml
+```
+- При этом можем посмотреть на job-ы(видим что restore фелится с ошибкой, т.к. не может найти файлик бекапа, но так и задумано):
+
+```
+kubectl get jobs.batch
+```
+
+- Для проверки что все работает как надо:
+
+```
+#посмотреть что за объекты у нас создались:
+kubectl get crd
+kubectl get mysqls.otus.homework
+kubectl describe mysqls.otus.homework mysql-instance
+
+# для удобства помещаем имя пода в переменную окружения
+export MYSQLPOD=$(kubectl get pods -l app=mysql-instance -o jsonpath="{.items[*].metadata.name}")
+# создаем табличку в нашей созданной оператором бд и закидываем туда две строчки данных
+kubectl exec -it $MYSQLPOD -- mysql -u root -potuspassword -e "CREATE TABLE test (id smallint unsigned not null auto_increment, name varchar(20) not null, constraint pk_example primary key (id) );" otus-database
+kubectl exec -it $MYSQLPOD -- mysql -potuspassword -e "INSERT INTO test ( id, name) VALUES ( null, 'some data' );" otus-database
+kubectl exec -it $MYSQLPOD -- mysql -potuspassword -e "INSERT INTO test ( id, name ) VALUES ( null, 'some data-2' );" otus-database
+# проверяем содержимое:
+kubectl exec -it $MYSQLPOD -- mysql -potuspassword -e "select * from test;" otus-database
+
+# проверяем удаление:
+kubectl delete mysqls.otus.homework mysql-instance
+# PV для mysql должен был удалиться, проверяем
+kubectl get pv
+# и проверяем что в момент удаления у нас выполнился бекап - джоб должен был отработать
+kubectl get jobs.batch
+
+# а теперь самое интересное, создаем инстанс еще раз:
+kubectl apply -f deploy/cr.yml
+
+#и смотрим job:
+kubectl get jobs.batch
+# мы должны увидеть что restore job запустился: он взял бд из бекапа и затолкал его в вновь созданный pv и мы можем проверить это:
+export MYSQLPOD=$(kubectl get pods -l app=mysql-instance -o jsonpath="{.items[*].metadata.name}")
+kubectl exec -it $MYSQLPOD -- mysql -potuspassword -e "select * from test;" otus-database
+```
+- для проверки в выводе должно быть что-то такое:
+
+```
+:~/otus/IsieIam_platform/kubernetes-operators(kubernetes-operators)$ kubectl get jobs.batch
+NAME                         COMPLETIONS   DURATION   AGE
+backup-mysql-instance-job    1/1           3s         102s
+restore-mysql-instance-job   1/1           3m31s      3m37s
+:~/otus/IsieIam_platform/kubernetes-operators(kubernetes-operators)$ export MYSQLPOD=$(kubectl get pods -l app=mysql-instance -o jsonpath="{.items[*].metadata.name}")
+:~/otus/IsieIam_platform/kubernetes-operators(kubernetes-operators)$ kubectl exec -it $MYSQLPOD -- mysql -potuspassword -e "select * from test;" otus-database
+mysql: [Warning] Using a password on the command line interface can be insecure.
++----+-------------+
+| id | name        |
++----+-------------+
+|  1 | some data   |
+|  2 | some data-2 |
++----+-------------+
+```
+
+- внимание - для 20 версии k8s оператор не может удалить PV, чистый тест возможен например на 16:
+
+```
+minikube start --vm-driver=docker --kubernetes-version=v1.16.1
+```
+### Задание со * :
+
+>Исправить контроллер, чтобы он писал в status subresource
+>Добавить в контроллер логику обработки изменений CR
+
+не делал - уровень моего кунг-фу в python пока недостаточен для этого :)
+
+
+</details>
