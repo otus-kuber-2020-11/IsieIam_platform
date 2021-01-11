@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-main                              # Название нашего объекта Deployment
+spec:
+  replicas: 3
+  selector:                              # Укажем, какие поды относятся к нашему Deployment:
+    matchLabels:                           # - это поды с меткой
+      app: web-main                               # app и ее значением web
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 100%
+  template:                              # Теперь зададим шаблон конфигурации пода
+    metadata:
+      name: web-main                          # Название Pod
+      labels:                            # Метки в формате key: value
+        app: web-main
+    spec:                                # Описание Pod
+      initContainers:
+        - name: web-init
+          image: busybox:1.31.0
+          command: ['sh', '-c', 'wget -O- https://tinyurl.com/otus-k8s-intro | sh']
+          volumeMounts:
+          - name: app
+            mountPath: /app
+      containers:                        # Описание контейнеров внутри Pod
+        - name: web-main                      # Название контейнера
+          image: isieiam/nginx-test:2.0  # Образ из которого создается контейнер
+          readinessProbe:                # Добавим проверку готовности
+            httpGet:                     # веб-сервера отдавать
+              path: /index.html          # контент
+              port: 8000
+          livenessProbe:
+            tcpSocket:
+              port: 8000
+          volumeMounts:
+          - name: app
+            mountPath: /app
+      volumes:
+        - name: app
+          emptyDir: {}
