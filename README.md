@@ -810,7 +810,7 @@ helm upgrade --install elasticsearch elastic/elasticsearch --namespace observabi
 helm upgrade --install kibana elastic/kibana --namespace observability -f kibana.values.yaml
 helm upgrade --install fluent-bit stable-old/fluent-bit --namespace observability -f fluentbit.values.yaml
 
-# ставим пром и экспорте для еластика:
+# ставим пром и экспортер для еластика:
 helm upgrade --install prometheus prometheus-community/kube-prometheus-stack -f kube-prometheus-stack/values.yaml --namespace observability
 helm upgrade --install elasticsearch-exporter stable-old/elasticsearch-exporter --set es.uri=http://elasticsearch-master:9200 --set serviceMonitor.enabled=true --namespace=observability
 
