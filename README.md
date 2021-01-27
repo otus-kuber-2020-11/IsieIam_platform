@@ -771,7 +771,7 @@ kubectl taint nodes kind-worker4 node-role=infra:NoSchedule
 - установлен prometheus-stack и elk exporter для сбора метрик elastic в проме.
 - импортирован дашборд https://grafana.com/grafana/dashboards/4358 для elastic в графану
 - проверена отработка мониторинга при отключении нод из infra pool
-- настроена попадание логов nginx в elastic (достаточно в fluentbit прописать tolerations, чтобы он установился и на те ноды где живет nginx ingress)
+- настроено попадание логов nginx в elastic (достаточно в fluentbit прописать tolerations, чтобы он установился и на те ноды где живет nginx ingress)
 - отформатированы логи nginx в json, в его values добавлены параметры, описанные по ссылка ниже:
 
 ```
@@ -786,14 +786,14 @@ https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/config
 ![nginx ingress kibana dashboard](./kubernetes-logging/screen/kibana_ingress.png)
 
 - установлен Loki и promtail через helm чарт, отдельно вынесены его values
-- добавлен datasource loki в values для promethesu-stack в additinal datasource у grafana(файл prometheus-operator.values.yaml добавлен в каталог, но по сути он от prometheus-stack лежащего рядом, а не от prom-operator)
+- добавлен datasource loki в values для prometheus-stack в additional datasource у grafana(файл prometheus-operator.values.yaml добавлен в каталог, но по сути он от prometheus-stack лежащего рядом, а не от prom-operator)
 - создан дашборд для nginx-ingress в grafana, содержащий логи nginx, ingress request volume, ingress success rate и срок истечения сертфииката
 - дашборд выгружен в nginx-ingress.json, хотя дашборд https://github.com/kubernetes/ingress-nginx/blob/master/deploy/grafana/dashboards/nginx.json - достаточно интересный для использования :)
 
 ![nginx ingress grafana dashboard](./kubernetes-logging/screen/grafana_ingress.png)
 
 ### Задания со *:
----
+- не делал
 
 ### Полезные команды:
 
