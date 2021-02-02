@@ -1,0 +1,3 @@
+[submodule "kubernetes-logging/kube-prometheus-stack/prometheus-charts"]
+	path = kubernetes-logging/kube-prometheus-stack/prometheus-charts
+	url = https://github.com/prometheus-community/helm-charts.git
