@@ -823,3 +823,248 @@ helm upgrade --install loki grafana/loki --namespace=observability -f loki.value
 
 </details>
 
+<details>
+<summary>Домашнее задание к лекции №15 (GitOps и инструменты поставки)
+</summary>
+
+### Задание:
+
+- Зарегался на gitlab - проект с microservice-demo: https://gitlab.com/isieiam/microservices-demo
+- helm чарты взяты готовые из демонстрационного репа: https://gitlab.com/express42/kubernetes-platform-demo/microservices-demo/
+- Для создания кластера в gce:
+
+```
+# Установка с Istio(так не работает, текущий istio, который дает google не совместим с актуальной версией flagger - набор метри istio разный):
+gcloud beta container clusters create otus-cluster \
+    --addons=Istio --istio-config=auth=MTLS_PERMISSIVE \
+    --cluster-version=1.17.16-gke.1600 \
+    --machine-type=n1-standard-2 \
+    --num-nodes=4 \
+    --zone=us-central1-c
+
+# Установка без Istio
+gcloud beta container clusters create otus-cluster \
+    --cluster-version=1.17.16-gke.1600 \
+    --machine-type=n1-standard-2 \
+    --num-nodes=4 \
+    --zone=us-central1-c
+
+# для настройки локального kubectl
+gcloud container clusters get-credentials otus-cluster --zone us-central1-c --project mytest-302917
+где otus-cluster - имя кластера, project - проект созданный в gce
+```
+
+- Собраны докер образы всех микросервисов, для упрощения сборки и пуша можно воспользоваться простеньким скриптом: kubernetes-gitops/build-all.sh
+- Установлен в кластер flux: https://docs.fluxcd.io/en/1.18.0/tutorials/get-started.html
+
+```
+# Добавляем repo helm-a
+helm repo add fluxcd https://charts.fluxcd.io
+helm repo update
+
+# Ставим crd:
+kubectl apply -f https://raw.githubusercontent.com/fluxcd/helm-operator/master/deploy/crds.yaml
+# Создаем namespace и ставим сам flux и helm-оператор для него (выполнять в каталоге kubernetes-gitops, где лежат кастомные values)
+kubectl create namespace flux
+helm upgrade --install flux fluxcd/flux -f flux.values.yaml --namespace flux
+helm upgrade --install helm-operator fluxcd/helm-operator -f helm-operator.values.yaml --namespace flux
+
+# ВНИМАНИЕ!!! - именно в values указано на какой репо смотрит flux для синхронизации
+
+# Качаем себе консольную утилиту flux-а
+wget https://github.com/fluxcd/flux/releases/download/1.21.1/fluxctl_linux_amd64
+
+# получаем ssh ключик для flux-а и далее его кидаем в наш репо, который мониторится flux-ом
+fluxctl identity --k8s-fwd-ns flux
+
+# принудительная синхронизация репа и сервисов в k8s
+fluxctl --k8s-fwd-ns flux sync
+
+# Если посмотреть логи flux, то там будут видны все попытки синка, для примера создание namespace
+ts=2021-02-07T17:57:24.106873143Z caller=sync.go:606 method=Sync cmd="kubectl apply -f -" took=639.97353ms err=null output="namespace/microservices-demo created"
+```
+
+- Проверено обновление сервиса через flux при появлении образа с новым тегом в docker-registry. Причем при текущих настройках работает не только инкремент версии образа, но и удаление тега из репа и откат на предыдущую версию.
+- Принцип работы flux: он мониторит репо и каталог, указанные в настройках. При этом он сам поставит и namespace и смотрит за своими yaml, лежащими в releases и имеющих тип:
+
+```
+apiVersion: helm.fluxcd.io/v1
+kind: HelmRelease
+```
+- Магия flux: при нахождении обновления(не важно в какую сторону), также и правит тег образа в самом репо где лежат его релизы.
+- Когда flux находит изменение, то в логах будет следующее(смотрим на front, он единственный кто поменялся):
+
+```
+ts=2021-02-07T18:45:05.744203654Z caller=release.go:79 component=release release=frontend targetNamespace=microservices-demo resource=microservices-demo:helmrelease/frontend helmVersion=v3 info="starting sync run"
+ts=2021-02-07T18:45:06.241820999Z caller=release.go:353 component=release release=frontend targetNamespace=microservices-demo resource=microservices-demo:helmrelease/frontend helmVersion=v3 info="running upgrade" action=upgrade
+ts=2021-02-07T18:45:06.302887418Z caller=helm.go:69 component=helm version=v3 info="preparing upgrade for frontend" targetNamespace=microservices-demo release=frontend
+ts=2021-02-07T18:45:06.312008041Z caller=helm.go:69 component=helm version=v3 info="resetting values to the chart's original version" targetNamespace=microservices-demo release=frontend
+ts=2021-02-07T18:45:06.609795672Z caller=helm.go:69 component=helm version=v3 info="performing update for frontend" targetNamespace=microservices-demo release=frontend
+ts=2021-02-07T18:45:06.681725276Z caller=helm.go:69 component=helm version=v3 info="creating upgraded release for frontend" targetNamespace=microservices-demo release=frontend
+ts=2021-02-07T18:45:06.701746662Z caller=helm.go:69 component=helm version=v3 info="checking 4 resources for changes" targetNamespace=microservices-demo release=frontend
+ts=2021-02-07T18:45:06.708246374Z caller=helm.go:69 component=helm version=v3 info="Looks like there are no changes for Service \"frontend\"" targetNamespace=microservices-demo release=frontend
+ts=2021-02-07T18:45:06.757950126Z caller=helm.go:69 component=helm version=v3 info="Created a new Deployment called \"frontend-hipster\" in microservices-demo\n" targetNamespace=microservices-demo release=frontend
+ts=2021-02-07T18:45:06.763248675Z caller=helm.go:69 component=helm version=v3 info="Looks like there are no changes for Gateway \"frontend-gateway\"" targetNamespace=microservices-demo release=frontend
+ts=2021-02-07T18:45:06.773521541Z caller=helm.go:69 component=helm version=v3 info="Looks like there are no changes for VirtualService \"frontend\"" targetNamespace=microservices-demo release=frontend
+ts=2021-02-07T18:45:06.775903703Z caller=helm.go:69 component=helm version=v3 info="Deleting \"frontend\" in microservices-demo..." targetNamespace=microservices-demo release=frontend
+ts=2021-02-07T18:45:07.104205333Z caller=helm.go:69 component=helm version=v3 info="updating status for upgraded release for frontend" targetNamespace=microservices-demo release=frontend
+ts=2021-02-07T18:45:07.135411421Z caller=release.go:364 component=release release=frontend targetNamespace=microservices-demo resource=microservices-demo:helmrelease/frontend helmVersion=v3 info="upgrade succeeded" revision=f7c4ad7b45349843881883009c276bad1e67cd64 phase=upgrade
+```
+
+- Отдельно установлен Istio: качаем с https://istio.io/latest/docs/setup/getting-started/ его архив и далее
+
+```
+# Ставим истио в кластер - namespace он создаст сам
+istioctl install --set profile=default -y
+# доставляем prometheus, именно в него istio будет заливать свои метрики, которые в том числе нужны для работы канарейки
+kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.9/samples/addons/prometheus.yaml -n istio-system
+```
+
+- Установлен Flagger
+
+```
+# Добавляем репо
+helm repo add flagger https://flagger.app
+helm repo update
+
+# ставим crd
+kubectl apply -f https://raw.githubusercontent.com/weaveworks/flagger/master/artifacts/flagger/crd.yaml
+
+# ставим флаггер и вот тут самая магия: здесь указан прометей, который мы поставили вместе с istio - именно с него он будет брать метрики istio
+helm upgrade --install flagger flagger/flagger \
+--namespace=istio-system \
+--set crd.create=false \
+--set meshProvider=istio \
+--set metricsServer=http://prometheus:9090
+```
+
+- Обратить внимание, что в yaml файле namespace - указан параметр   labels:  istio-injection: enabled - это нужно для того, чтобы подселить istio в каждый наш сервис.
+Если посмотреть список подов - то видно будет что в каждом из них стало по 2 контейнера: один сам сервис, второй sidecar контейнер с istio.
+
+- Istio может играть роль ингресса, для этого сервису(который мы хотим вставить наружу) нужно создать две доп сущности: gateway и virtualservice - см на примере frontend.
+- Для того чтобы посмотреть ext адрес istio: kubectl get gateway -n microservices-demo
+- Canary релиз через flagger: создается отдельная сущность flagger- см yaml canary в каталоге frontend https://gitlab.com/isieiam/microservices-demo/-/blob/master/deploy/charts/frontend/templates/canary.yaml
+
+```
+# Более подробная инфо: https://docs.flagger.app/how-it-works#canary-custom-resource
+
+# смотрим на canary
+kubectl get canary -n microservices-demo
+NAMESPACE NAME STATUS WEIGHT LASTTRANSITIONTIME
+microservices-demo frontend Initializing 0 2020-02-09T22:23:00Z
+
+# когда он создается, то основной сервис получает приписку primary
+kubectl get pods -n microservices-demo -l app=frontend-primary
+NAME READY STATUS RESTARTS AGE
+frontend-primary-649f9c4579-jgv8h 2/2 Running 0 2m56s
+```
+
+- При установленном canary если обновить образ сервиса, то согласно конфигу канарейки часть запросов пойдут на нее и дальше согласно настройкам, доля канарейки будет повышаться и в конце концов она поменяется с текущим primary. 
+Но для использования этого в проме - метрики должны быть достаточно для определния живости сервиса. В нашем примере используется просто анализ кодов ответов на запросы.
+
+```
+# Если выполнить:
+kubectl describe canary frontend -n microservices-demo
+# то увидим как менялась доля канарейки (в нашем случае по настройкам на canary сразу шло 50% трафика)
+Events:
+  Type     Reason  Age                From     Message
+  ----     ------  ----               ----     -------
+  Warning  Synced  23m                flagger  frontend-primary.microservices-demo not ready: waiting for rollout to finish: observed deployment generation less then desired generation
+  Normal   Synced  22m (x2 over 23m)  flagger  all the metrics providers are available!
+  Normal   Synced  22m                flagger  Initialization done! frontend.microservices-demo
+  Normal   Synced  8m2s               flagger  New revision detected! Scaling up frontend.microservices-demo
+  Normal   Synced  7m2s               flagger  Starting canary analysis for frontend.microservices-demo
+  Normal   Synced  7m2s               flagger  Advance frontend.microservices-demo canary weight 50
+  Normal   Synced  6m2s               flagger  Advance frontend.microservices-demo canary weight 100
+  Normal   Synced  5m2s               flagger  Copying frontend.microservices-demo template spec to frontend-primary.microservices-demo
+  Normal   Synced  4m2s               flagger  Routing all traffic to primary
+  Normal   Synced  3m2s               flagger  Promotion completed! Scaling down frontend.microservices-demo
+```
+
+- Есть один хитрый момент: для используемых настроек и метрик нужно чтобы был трафик на сервис - если его не будет - то нечего анализировать и канарейка просто умрет :)
+
+<details>
+<summary>Полный вывод по canary</summary>
+
+```
+isie@isie-VirtualBox:~/otus/IsieIam_platform/kubernetes-gitops(kubernetes-gitops)$ kubectl get canaries -n microservices-demo
+NAME       STATUS      WEIGHT   LASTTRANSITIONTIME
+frontend   Succeeded   0        2021-02-13T19:42:08Z
+
+============================
+isie@isie-VirtualBox:~/otus/IsieIam_platform/kubernetes-gitops(kubernetes-gitops)$ kubectl describe canary frontend -n microservices-demo
+Name:         frontend
+Namespace:    microservices-demo
+Labels:       <none>
+Annotations:  helm.fluxcd.io/antecedent: microservices-demo:helmrelease/frontend
+API Version:  flagger.app/v1beta1
+Kind:         Canary
+Metadata:
+  Creation Timestamp:  2021-02-13T19:21:49Z
+  Generation:          1
+  Resource Version:    18778
+  Self Link:           /apis/flagger.app/v1beta1/namespaces/microservices-demo/canaries/frontend
+  UID:                 8f026823-7775-4588-b920-cb058879cc45
+Spec:
+  Analysis:
+    Interval:    1m
+    Max Weight:  100
+    Metrics:
+      Interval:               1m
+      Name:                   request-success-rate
+      Threshold:              99
+    Step Weight:              50
+    Threshold:                2
+  Progress Deadline Seconds:  60
+  Service:
+    Gateways:
+      frontend-gateway
+    Hosts:
+      front.34.122.52.80.xip.io
+    Port:  80
+    Retries:
+      Attempts:         3
+      Per Try Timeout:  1s
+      Retry On:         gateway-error,connect-failure,refused-stream
+    Target Port:        8080
+    Traffic Policy:
+      Tls:
+        Mode:  DISABLE
+  Target Ref:
+    API Version:  apps/v1
+    Kind:         Deployment
+    Name:         frontend
+Status:
+  Canary Weight:  0
+  Conditions:
+    Last Transition Time:  2021-02-13T19:42:08Z
+    Last Update Time:      2021-02-13T19:42:08Z
+    Message:               Canary analysis completed successfully, promotion finished.
+    Reason:                Succeeded
+    Status:                True
+    Type:                  Promoted
+  Failed Checks:           0
+  Iterations:              0
+  Last Applied Spec:       67794895c9
+  Last Transition Time:    2021-02-13T19:42:08Z
+  Phase:                   Succeeded
+  Tracked Configs:
+Events:
+  Type     Reason  Age                From     Message
+  ----     ------  ----               ----     -------
+  Warning  Synced  23m                flagger  frontend-primary.microservices-demo not ready: waiting for rollout to finish: observed deployment generation less then desired generation
+  Normal   Synced  22m (x2 over 23m)  flagger  all the metrics providers are available!
+  Normal   Synced  22m                flagger  Initialization done! frontend.microservices-demo
+  Normal   Synced  8m2s               flagger  New revision detected! Scaling up frontend.microservices-demo
+  Normal   Synced  7m2s               flagger  Starting canary analysis for frontend.microservices-demo
+  Normal   Synced  7m2s               flagger  Advance frontend.microservices-demo canary weight 50
+  Normal   Synced  6m2s               flagger  Advance frontend.microservices-demo canary weight 100
+  Normal   Synced  5m2s               flagger  Copying frontend.microservices-demo template spec to frontend-primary.microservices-demo
+  Normal   Synced  4m2s               flagger  Routing all traffic to primary
+  Normal   Synced  3m2s               flagger  Promotion completed! Scaling down frontend.microservices-demo
+```
+
+</details>
+
+
+</details>
