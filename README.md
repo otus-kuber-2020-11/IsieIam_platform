@@ -988,6 +988,8 @@ Events:
 - При этом - выше это метрики, которые используются для настройки canary, но если посмотреть prometheus у flagger есть и свои статусные метрики связанные с самими сущностями canary, например:
 ![flagger own metrics](./kubernetes-gitops/screens/flagger_canary.png)
 
+Одна метрика: зеленая - это primary сервис, красная, это canary, видно что в какой-то момент, их доля изменилась сначала на 50%(такие настройки в конфиге canary), а потом и на 100%.
+
 <details>
 <summary>Полный вывод по canary</summary>
 
