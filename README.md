@@ -834,7 +834,7 @@ helm upgrade --install loki grafana/loki --namespace=observability -f loki.value
 - Для создания кластера в gce:
 
 ```
-# Установка с Istio(так не работает, текущий istio, который дает google не совместим с актуальной версией flagger - набор метри istio разный):
+# Установка с Istio(так не работает, текущий istio, который дает google не совместим с актуальной версией flagger - набор метрик istio разный):
 gcloud beta container clusters create otus-cluster \
     --addons=Istio --istio-config=auth=MTLS_PERMISSIVE \
     --cluster-version=1.17.16-gke.1600 \
@@ -885,6 +885,7 @@ ts=2021-02-07T17:57:24.106873143Z caller=sync.go:606 method=Sync cmd="kubectl ap
 ```
 
 - Проверено обновление сервиса через flux при появлении образа с новым тегом в docker-registry. Причем при текущих настройках работает не только инкремент версии образа, но и удаление тега из репа и откат на предыдущую версию.
+Из интересного стоит обратить внимание на выбор тегов образов - задаются регуляркой, т.е. можно не все теги брать на автоматический синк.
 - Принцип работы flux: он мониторит репо и каталог, указанные в настройках. При этом он сам поставит и namespace и смотрит за своими yaml, лежащими в releases и имеющих тип:
 
 ```
@@ -911,6 +912,7 @@ ts=2021-02-07T18:45:07.104205333Z caller=helm.go:69 component=helm version=v3 in
 ts=2021-02-07T18:45:07.135411421Z caller=release.go:364 component=release release=frontend targetNamespace=microservices-demo resource=microservices-demo:helmrelease/frontend helmVersion=v3 info="upgrade succeeded" revision=f7c4ad7b45349843881883009c276bad1e67cd64 phase=upgrade
 ```
 
+- Написаны flux-релизы для всех сервисов демки (сервисы поднимутся с первого раза не все и это норм, зафейлится loadgenerator т.к. в текущих настройках он мониторит фронт с внешнего url и при условии, что  ingress или istio при этом нет).
 - Отдельно установлен Istio: качаем с https://istio.io/latest/docs/setup/getting-started/ его архив и далее
 
 ```
@@ -919,8 +921,13 @@ istioctl install --set profile=default -y
 # доставляем prometheus, именно в него istio будет заливать свои метрики, которые в том числе нужны для работы канарейки
 kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.9/samples/addons/prometheus.yaml -n istio-system
 ```
-
-- Установлен Flagger
+- У istio есть интересная настройка, которая явно задаётся при создании его через gce addon --istio-config=auth=MTLS_PERMISSIV - она отвечает за то какой вид трафик разрешает istio между подами.
+Подробно об этом здесь: https://istio.io/latest/docs/tasks/security/authentication/mtls-migration/
+- Обратить внимание, что в yaml файле namespace - указан параметр   labels:  istio-injection: enabled - это нужно для того, чтобы подселить istio в каждый наш сервис.
+Если посмотреть список подов - то видно будет что в каждом из них стало по 2 контейнера: один сам сервис, второй sidecar контейнер с istio(но автоматом подселение не произойдет, только при пересоздании подов).
+- Istio может играть роль ингресса, для этого сервису(который мы хотим вставить наружу) нужно создать две доп сущности: gateway и virtualservice - см на примере frontend.
+- Для того чтобы посмотреть ext адрес istio: kubectl get gateway -n microservices-demo
+- Установлен Flagger( оператор Kubernetes, созданный для автоматизации canarydeployments):
 
 ```
 # Добавляем репо
@@ -938,12 +945,7 @@ helm upgrade --install flagger flagger/flagger \
 --set metricsServer=http://prometheus:9090
 ```
 
-- Обратить внимание, что в yaml файле namespace - указан параметр   labels:  istio-injection: enabled - это нужно для того, чтобы подселить istio в каждый наш сервис.
-Если посмотреть список подов - то видно будет что в каждом из них стало по 2 контейнера: один сам сервис, второй sidecar контейнер с istio.
-
-- Istio может играть роль ингресса, для этого сервису(который мы хотим вставить наружу) нужно создать две доп сущности: gateway и virtualservice - см на примере frontend.
-- Для того чтобы посмотреть ext адрес istio: kubectl get gateway -n microservices-demo
-- Canary релиз через flagger: создается отдельная сущность flagger- см yaml canary в каталоге frontend https://gitlab.com/isieiam/microservices-demo/-/blob/master/deploy/charts/frontend/templates/canary.yaml
+- Canary релиз через flagger: создается отдельная сущность flagger - см yaml canary в каталоге frontend https://gitlab.com/isieiam/microservices-demo/-/blob/master/deploy/charts/frontend/templates/canary.yaml
 
 ```
 # Более подробная инфо: https://docs.flagger.app/how-it-works#canary-custom-resource
@@ -1067,5 +1069,9 @@ Events:
 
 </details>
 
+### Задания со *:
+
+- не делал, но часть для себя отметил (в частности пощупать argocd)
 
 </details>
+
