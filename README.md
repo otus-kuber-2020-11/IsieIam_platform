@@ -1264,12 +1264,20 @@ token/    token    auth_token_cd28eefb    token based credentials
 - Заведем и проверим заведение секретов в vault
 
 ```
+# включаем kv(key/value) секреты
 kubectl exec -it vault-0 -- vault secrets enable --path=otus kv
+# проверяем список
 kubectl exec -it vault-0 -- vault secrets list --detailed
+# зводим секреты
 kubectl exec -it vault-0 -- vault kv put otus/otus-ro/config username='otus' password='asajkjkahs'
 kubectl exec -it vault-0 -- vault kv put otus/otus-rw/config username='otus' password='asajkjkahs'
+# читаем данные по пути:
 kubectl exec -it vault-0 -- vault read otus/otus-ro/config
+# получаем значения kv секрета
 kubectl exec -it vault-0 -- vault kv get otus/otus-rw/config
+# Отличия в последних командах можно посмотреть здесь:
+https://www.vaultproject.io/docs/commands/read
+https://www.vaultproject.io/docs/commands/kv/get
 ```
 
 - При чтении секрета получим следующий вывод:
@@ -1397,7 +1405,7 @@ capabilities = ["read", "create", "list", "update"]
 
 #### Практический пример с nginx:
 
-- Разеберем практический пример использования кредов в подах кубера на примере nginx:
+- Разберем практический пример использования кредов в подах кубера на примере nginx:
 ```
 Авторизуемся через vault-agent и получим клиентский токен
 Через consul-template достанем секрет и положим его в nginx
@@ -1428,6 +1436,7 @@ index.html
 ```
 
 - Либо если пробросить порт nginx наружу: kubectl port-forward pod/vault-agent-example 8080:80, получим следующее:
+
 ![nginx html](./kubernetes-vault/demo/vault01.png)
 
 #### создадим CA на базе vault
@@ -1487,6 +1496,7 @@ allowed_domains="example.ru" allow_subdomains=true max_ttl="720h"
 - Создадим сертификат: kubectl exec -it vault-0 -- vault write pki_int/issue/example-dot-ru common_name="gitlab.example.ru" ttl="24h", вывод сертификата:
 
 <details>
+
 ```
 $ kubectl exec -it vault-0 -- vault write pki_int/issue/example-dot-ru common_name="gitlab.example.ru" ttl="24h"
 Key                 Value
@@ -1587,6 +1597,7 @@ PdCXG4c9bvxhA1S0CbCUVOhVVlFI+m1aOkm6k2sOTpUFre+SsW8EOTkiDkgI9fbm
 private_key_type    rsa
 serial_number       5e:e9:31:f6:5b:cc:11:24:51:aa:5f:ef:bb:69:4a:c5:d7:e8:89:bc
 ```
+
 </details>
 
 - отзовем сертификат: 
