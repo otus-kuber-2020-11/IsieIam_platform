@@ -1101,7 +1101,7 @@ gcloud container clusters get-credentials otus-cluster --zone us-central1-c --pr
 - Установлены consul и сам vault: consul является хранилищем для vault-а
 
 ```
-# добавляем реп hasicorp
+# добавляем реп hashicorp
 helm repo add hashicorp https://helm.releases.hashicorp.com
 helm repo update
 # install consul
@@ -1109,6 +1109,7 @@ https://github.com/hashicorp/consul-helm
 helm install consul hashicorp/consul --set global.name=consul
 # install vault
 https://www.vaultproject.io/docs/platform/k8s/helm
+# из каталога kubernetes-vault, где лежит правленный файл со значениями:
 helm install -f vault-values.yaml vault hashicorp/vault 
 ```
 
@@ -1155,7 +1156,7 @@ vault-agent-injector-79f4bb5689-p7rft   1/1     Running   0          85s
 ```
 
 - Есть интересный момент если пытаться развернуть consul в kind или minicube - по каким то причинам id нод consul один и тот же и происходит постоянный перевыбор активной ноды. При этом у consul есть спец параметр чтобы не зависеть от id ноды, но оно не помогает. Если отключить ha режим - то все ок.
-- Проведем инициализаю vault, можно через любой под vault. На выходе получает root токен для обращения к апи и ключ lkz unseal нод:
+- Проведем инициализаю vault, можно через любой под vault. На выходе получает root токен для обращения к апи и ключ для unseal нод:
 
 ```
 $ kubectl exec -it vault-0 -- vault operator init --key-shares=1 --key-threshold=1
@@ -1163,7 +1164,7 @@ Unseal Key 1: J3/CqFThg6mu4yePeLltBQI7Qdo/yUR1ODoPHqti244=
 Initial Root Token: s.NW5XyfagsqL1ongygqq6NOuv
 ...
 ```
-- с точки зрения key-shares и key-treshhold: key-shares- ск-ко ключей для unseal сгенерится(т.е. фактически это ск-ко хешей мастер ключа будет создано), key-treshhold - ск-ко ключеей(хешей мастер ключа) нужно для получения самого мастер ключа или разблокировки vault. Подробности тут: https://www.vaultproject.io/docs/commands/operator/init
+- с точки зрения key-shares и key-treshhold: key-shares- ск-ко ключей для unseal сгенерится(т.е. фактически это ск-ко хешей мастер ключа будет создано), key-treshhold - ск-ко ключей(хешей мастер ключа) нужно для получения самого мастер ключа или разблокировки vault. Подробности тут: https://www.vaultproject.io/docs/commands/operator/init
 - распечатаем каждую ноду vault, при этом в момент unseal как раз вводятся unseal ключи полученные нами на предыдущем шаге 
 
 ```
@@ -1172,9 +1173,10 @@ kubectl exec -it vault-1 -- vault operator unseal
 kubectl exec -it vault-2 -- vault operator unseal
 ```
 
-- Далее посмотрим на статус после unseal, при этом видно что мастером является 0 нода, остальныые в standby:
+- Далее посмотрим на статус после unseal, при этом видно что мастером является 0 нода, остальные в standby:
 
 <details>
+
 ```
 $ kubectl exec -it vault-0 -- vault status
 Key             Value
