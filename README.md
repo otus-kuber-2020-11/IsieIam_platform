@@ -1138,7 +1138,7 @@ Your release is named vault. To learn more about the release, try:
   $ helm get manifest vault
 ```
 
-- При этом если посмотреть статус подов vault, то они running но не ready, до тех пор пока не пройдет unseal. Что такое seal и unseal - фактически в режиме unseal -vault запечатан, даже для себя - в текущем состоянии достать из него хранимые секреты невозможно. Чтобы начать с ним общаться - надо его распечатать:
+- При этом если посмотреть статус подов vault, то они running но не ready, до тех пор пока не пройдет unseal. Что такое seal и unseal - фактически в режиме seal -vault запечатан, даже для себя - в текущем состоянии достать из него хранимые секреты невозможно. Чтобы начать с ним общаться - надо его распечатать(unseal):
 
 ```
 isie@isie-VirtualBox:~/otus/IsieIam_platform/kubernetes-vault(kubernetes-vault)$ kubectl get pods
