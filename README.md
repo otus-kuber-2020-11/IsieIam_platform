@@ -1413,8 +1413,8 @@ capabilities = ["read", "create", "list", "update"]
 ```
 
 - скачаем набор примеров с git clone https://github.com/hashicorp/vault-guides.git и перейдем к нашему:  vault-guides/identity/vault-agent-k8s-demo
-- скорректированные конфиги приложены в kubernetes-vault/demo. По файлам: по факту нам нужны только два: configmap.yaml и example-k8s-spec.yaml, т.к. crb мы создали уже выше.
-- configmap - используется политика для vault с шаблоном файла html для nginx, в котором указаны переменные для получения кредов из vault-а. А в example* фактически разворачивание nginx и подцепление конфигмепа как volume в страничку nginx. Больше подробностей можно найти в kubernetes-vault/demo/README.md самого примера
+- скорректированные конфиги приложены в kubernetes-vault/configs-k8s. По файлам: по факту нам нужны только два: configmap.yaml и example-k8s-spec.yaml, т.к. crb мы создали уже выше.
+- configmap - используется политика для vault с шаблоном файла html для nginx, в котором указаны переменные для получения кредов из vault-а. А в example* фактически разворачивание nginx и подцепление конфигмепа как volume в страничку nginx. Больше подробностей можно найти в kubernetes-vault/configs-k8s/README.md самого примера
 - если зайти в под с nginx то можно в html странице найти уд:
 
 ```
@@ -1437,7 +1437,7 @@ index.html
 
 - Либо если пробросить порт nginx наружу: kubectl port-forward pod/vault-agent-example 8080:80, получим следующее:
 
-![nginx html](./kubernetes-vault/demo/vault01.png)
+![nginx html](./kubernetes-vault/configs-k8s/vault01.png)
 
 #### создадим CA на базе vault
 
