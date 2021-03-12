@@ -1617,3 +1617,118 @@ isie@isie-VirtualBox:~/otus/IsieIam_platform/kubernetes-vault(kubernetes-vault)$
 - не делал
 
 </details>
+
+<details>
+<summary>Домашнее задание к лекции №22 (CSI. Обзор подсистем хранения данных в Kubernetes)
+</summary>
+
+### Задание: установить CSI-драйвер и протестировать функционал снапшотов
+
+ - Выбираем host path csi driver: https://github.com/kubernetes-csi/csi-driver-host-path, в частности пойдем по  инструкции по ссылке https://github.com/kubernetes-csi/csi-driver-host-path/blob/master/docs/deploy-1.17-and-later.md
+ - Проверять будем на minikube
+
+```
+# стандартная шпаргалка по m inikube
+minikube start --vm-driver=docker
+minikube addons enable ingress
+minikube stop
+minikube delete
+```
+
+ - Проверяем что у нас нет в кластере сущностей которые будет создавать драйвер:
+
+```
+kubectl get volumesnapshotclasses.snapshot.storage.k8s.io
+kubectl get volumesnapshots.snapshot.storage.k8s.io
+kubectl get volumesnapshotcontents.snapshot.storage.k8s.io
+```
+
+ - Далее прописываем переменную окружения и ставим crd:
+
+```
+# Change to the latest supported snapshotter version
+SNAPSHOTTER_VERSION=v2.0.1
+# Apply VolumeSnapshot CRDs
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/${SNAPSHOTTER_VERSION}/config/crd/snapshot.storage.k8s.io_volumesnapshotclasses.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/${SNAPSHOTTER_VERSION}/config/crd/snapshot.storage.k8s.io_volumesnapshotcontents.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/${SNAPSHOTTER_VERSION}/config/crd/snapshot.storage.k8s.io_volumesnapshots.yaml
+
+# Create snapshot controller
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/${SNAPSHOTTER_VERSION}/deploy/kubernetes/snapshot-controller/rbac-snapshot-controller.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/${SNAPSHOTTER_VERSION}/deploy/kubernetes/snapshot-controller/setup-snapshot-controller.yaml
+```
+
+ - Проводим установку самого csi driver (последняя рабочая для snapshot версия 1.4, остальные под snapshot контроллера фейлится при запуске :():
+
+```
+# Clone the repo
+git clone https://github.com/kubernetes-csi/csi-driver-host-path
+cd csi-driver-host-path
+git checkout release-1.4
+# Deploy
+deploy/kubernetes-latest/deploy.sh
+kubectl get pods
+```
+
+ - далее из каталога kubernetes-storage/hw применяем 01, 02, 03 yaml - storageclass, pvc и сам pod: на выходе получаем созданные sc, pvc, pod и в том числе и pv, причем видим что имя pv сгенерилось:
+
+```
+kubectl get pvc
+NAME          STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS      AGE
+storage-pvc   Bound    pvc-bc3e9f73-c813-4e72-a95d-430a98566a3d   1Gi        RWO            csi-hostpath-sc   6s
+kubectl get pv
+NAME                                       CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                 STORAGECLASS      REASON   AGE
+pvc-bc3e9f73-c813-4e72-a95d-430a98566a3d   1Gi        RWO            Delete           Bound    default/storage-pvc   csi-hostpath-sc            6s
+```
+
+ - заходим в подик и создаем какой-либо файлик в каталог /data - куда мы примонтировали volume
+
+```
+kubectl exec -it storage-pod -- sh
+/ # echo "Hello world" > /data/hw.txt
+/ # cat /data/hw.txt 
+Hello world
+/ # exit
+```
+
+ - проверим работоспособность snapshot: применим 04 yaml - он создает snapshot по имени pvc, на выходе получаем snapshot:
+
+```
+kubectl get volumesnapshot
+NAME               AGE
+storage-snapshot   10s
+```
+
+ - а далее удаляем наш pod и pvc(сначала pod), убежадаемся что все удалилось и применяем 05 yaml с восстановлением с нашего snapshot
+
+```
+kubectl apply -f 05-restore.yaml
+persistentvolumeclaim/storage-pvc created
+kubectl get pv
+NAME                                       CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                 STORAGECLASS      REASON   AGE
+pvc-83115efc-4554-487d-bd8b-eefe4c1d7037   1Gi        RWO            Delete           Bound    default/storage-pvc   csi-hostpath-sc            4s
+```
+
+ - возвращаем наш pod, заходим в него и проверяем наличие нашего файлика:
+
+```
+kubectl exec -it storage-pod -- sh
+/ # cd /data
+/data # ls -la
+total 12
+drwxr-xr-x    2 root     root          4096 Mar 12 17:31 .
+drwxr-xr-x    1 root     root          4096 Mar 12 17:32 ..
+-rw-r--r--    1 root     root            12 Mar 12 17:26 hw.txt
+/data # cat hw.txt 
+Hello world
+/data # 
+```
+
+ - из интересного, как хранится volume и snapshot на диске, смотрим в каталоге докера, при этом snap по факту равно tar с файликами и каталогами, которые мы насоздавали:
+
+```
+root@VirtualBox:/home/docker/volumes/minikube/_data/lib/csi-hostpath-data# ls
+2480a555-8358-11eb-8954-0242ac110004.snap  d12236be-8358-11eb-8954-0242ac110004
+```
+
+</details>
