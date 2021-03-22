@@ -1733,3 +1733,213 @@ root@VirtualBox:/home/docker/volumes/minikube/_data/lib/csi-hostpath-data# ls
 
 </details>
 
+<details>
+<summary>Домашнее задание к лекции №23 (Диагностика и отладка кластера и приложений в нем )
+</summary>
+
+### Задание #1: kubectl-debug
+
+ - Установлен kubectl-debug :
+
+```
+# сама тулза по ссылке
+https://github.com/aylei/kubectl-debug/releases/download/v0.1.1/kubectl-debug_0.1.1_linux_amd64.tar.gz
+# его daemonset ставим из каталога kubernetes-debug/strace
+kubectl apply -f kubectl-debug.yaml
+# тестовое приложени
+kubectl-debug test-pod --agentless=false
+```
+
+ - Если просто запустить kubectl-debug  с изначальным манифестом на испытуемом контейнере то получим следующее
+
+```
+>kubectl-debug test-pod --agentless=false
+pulling image nicolaka/netshoot:latest... 
+latest: Pulling from nicolaka/netshoot
+Digest: sha256:6ae5a524ab390824a43a29a8a2ec7b9c013736d98a0aed264f1132196098aac2
+Status: Image is up to date for nicolaka/netshoot:latest
+starting debug container...
+container created, open tty...
+bash-5.1# strace -c -p1
+strace: attach: ptrace(PTRACE_SEIZE, 1): Operation not permitted
+```
+
+ - Проблема заключается в нехватке нужных capabilities, проверить это можно следующим образом:
+
+```
+# заходим на нашу ноду, ищем контейнер с debug тулзой и смотрим:
+nicolaka/netshoot:latest
+docker@minikube:~$ docker inspect c52d00942af7 | grep Cap
+            "CapAdd": null,
+            "CapDrop": null,
+```
+
+ - Если взять актуальную версию агента для daemonset то проблема решается:
+
+```
+docker@minikube:~$ docker inspect 208301e71a19
+kubectl delete daemonset debug-agent
+...
+            "CapAdd": [
+                "SYS_PTRACE",
+                "SYS_ADMIN"
+            ],
+            "CapDrop": null,
+...
+```
+
+ - при пересоздании ds в результате strace запускается:
+
+```
+> kubectl-debug test-pod --agentless=false
+container created, open tty...
+bash-5.1# strace -c -p1
+strace: Process 1 attached
+```
+
+### Задание #2: iptables-tailer
+
+ - Для тестов возьмем netperf-operator (https://github.com/piontec/netperf-operator) - это Kubernetes-оператор, который позволяет запускать тесты пропускной способности сети между нодами кластера (вестма прикольная штука: запускает сервер-под и клиент-под и гонит между ними трафик, см описание - как задавать между какими нодами надо погонять трафик)
+ - Установим netperf-operator (из каталога kubernetes-debug/kit):
+
+```
+kubectl apply -f ./deploy/crd.yaml
+kubectl apply -f ./deploy/rbac.yaml
+kubectl apply -f ./deploy/operator.yaml
+```
+
+ - Запустим пример:
+
+```
+kubectl apply -f ./deploy/cr.yaml
+
+# и в результате получим три наших пода:
+> kubectl get pods
+NAME                                READY   STATUS    RESTARTS   AGE
+netperf-client-060dca947b58         1/1     Running   0          5s
+netperf-operator-55b49546b5-lmvn5   1/1     Running   0          2m37s
+netperf-server-060dca947b58         1/1     Running   0          14s
+```
+
+<details>
+
+```
+kubectl describe netperf.app.example.com/example
+Name:         example
+Namespace:    default
+Labels:       <none>
+Annotations:  <none>
+API Version:  app.example.com/v1alpha1
+Kind:         Netperf
+Metadata:
+  Creation Timestamp:  2021-03-13T17:56:56Z
+  Generation:          4
+  Managed Fields:
+    API Version:  app.example.com/v1alpha1
+    Fields Type:  FieldsV1
+    fieldsV1:
+      f:metadata:
+        f:annotations:
+          .:
+          f:kubectl.kubernetes.io/last-applied-configuration:
+    Manager:      kubectl-client-side-apply
+    Operation:    Update
+    Time:         2021-03-13T17:56:56Z
+    API Version:  app.example.com/v1alpha1
+    Fields Type:  FieldsV1
+    fieldsV1:
+      f:spec:
+        .:
+        f:clientNode:
+        f:serverNode:
+      f:status:
+        .:
+        f:clientPod:
+        f:serverPod:
+        f:speedBitsPerSec:
+        f:status:
+    Manager:         netperf-operator
+    Operation:       Update
+    Time:            2021-03-13T17:56:56Z
+  Resource Version:  873
+  UID:               cba6e132-e14c-4f1b-927f-060dca947b58
+Spec:
+  Client Node:  
+  Server Node:  
+Status:
+  Client Pod:          netperf-client-060dca947b58
+  Server Pod:          netperf-server-060dca947b58
+  Speed Bits Per Sec:  2707.35
+  Status:              Done
+Events:                <none>
+```
+
+</details>
+
+ - Далее применим политику calico, чтобы обрубить сетку и увидеть ошибки по сети:
+
+```
+# сама политика:
+kubectl apply -f netperf-calico-policy.yaml
+# пересоздаем наш тест:
+kubectl delete -f ./deploy/cr.yaml
+kubectl apply -f ./deploy/cr.yaml
+# и дальше смотрим описание
+kubectl describe netperf.app.example.com/example
+# в результате тест никогда не выполнится и провисит в подобном статусе:
+...
+Status:
+  Client Pod:          netperf-client-7e9741bc3eca
+  Server Pod:          netperf-server-7e9741bc3eca
+  Speed Bits Per Sec:  0
+  Status:              Started test
+Events:                <none>
+```
+
+ - при этом в логах iptables будут drop-ы и для того чтобы получить подобные ошибки в event например при describe pod через kubectl как раз и используется tailer:
+
+```
+# добавляем для него права:
+kubectl apply -f kit-serviceaccount.yaml
+kubectl apply -f kit-clusterrole.yaml
+kubectl apply -f kit-clusterrolebinding.yaml
+# и применяем манифест:
+kubectl apply -f iptables-tailer.yaml 
+
+# убежаемся что оно запустилось:
+kubectl describe daemonset kube-iptables-tailer -n kube-system
+# или 
+kubectl get pods -n kube-system | grep tailer
+```
+
+ - Далее снова запускаем тест, через удаление и смотрим описание одного из подов, пусть будут event пода сервера:
+
+```
+# удаляем
+kubectl delete -f ./deploy/cr.yaml
+kubectl apply -f ./deploy/cr.yaml
+
+# смотрим описание:
+
+
+kubectl describe pod netperf-server-21b0a97f3d97
+...
+Events:
+  Type     Reason      Age   From                  Message
+  ----     ------      ----  ----                  -------
+  Normal   Scheduled   113s  default-scheduler     Successfully assigned default/netperf-server-21b0a97f3d97 to gke-otus-cluster-default-pool-290f3c0e-02lj
+  Normal   Pulled      112s  kubelet               Container image "tailoredcloud/netperf:v2.7" already present on machine
+  Normal   Created     112s  kubelet               Created container netperf-server-21b0a97f3d97
+  Normal   Started     112s  kubelet               Started container netperf-server-21b0a97f3d97
+  Warning  PacketDrop  110s  kube-iptables-tailer  Packet dropped when receiving traffic from client (10.12.0.18)
+```
+
+ - Calico можно запустить и minikube, команда ниже, но с местоположение логов iptables и запуском tailer придется повозиться. В гугл облаке все прошло успешно.
+
+```
+# запуск minikube с явным указанием cni (на будущее)
+minikube start --vm-driver=docker --network-plugin=cni --cni=calico
+```
+
+</details>
+
