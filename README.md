@@ -1943,3 +1943,525 @@ minikube start --vm-driver=docker --network-plugin=cni --cni=calico
 
 </details>
 
+<details>
+<summary>Домашнее задание к лекции №24 (Подходы к развертыванию и обновлению production-grade кластера)
+</summary>
+
+### Задание - установка через kubeadm
+
+- Создаем ноды и подключаемся к ним:
+
+```
+gcloud compute instances create master --zone=us-central1-c --image-project=ubuntu-os-cloud --image-family=ubuntu-minimal-1804-lts --machine-type=n1-standard-2
+gcloud compute instances create worker0 --zone=us-central1-c --image-project=ubuntu-os-cloud --image-family=ubuntu-minimal-1804-lts --machine-type=n1-standard-1
+gcloud compute instances create worker1 --zone=us-central1-c --image-project=ubuntu-os-cloud --image-family=ubuntu-minimal-1804-lts --machine-type=n1-standard-1
+gcloud compute instances create worker2 --zone=us-central1-c --image-project=ubuntu-os-cloud --image-family=ubuntu-minimal-1804-lts --machine-type=n1-standard-1
+
+gcloud beta compute ssh --zone "us-central1-c" "master" --project "mytest-302917"
+gcloud beta compute ssh --zone "us-central1-c" "worker0" --project "mytest-302917"
+gcloud beta compute ssh --zone "us-central1-c" "worker1" --project "mytest-302917"
+gcloud beta compute ssh --zone "us-central1-c" "worker2" --project "mytest-302917"
+```
+
+ - Подготавливаем ноды:
+
+```
+# === Отключаем swap
+swapoff -a
+
+# === Включаем маршрутизацию
+cat > /etc/sysctl.d/99-kubernetes-cri.conf <<EOF
+net.bridge.bridge-nf-call-iptables = 1
+net.ipv4.ip_forward = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+EOF
+sysctl --system
+
+# === Установим Docker
+# ставим доп пакетики:
+apt update && apt-get install -y apt-transport-https ca-certificates curl software-properties-common gnupg2 mc
+# добавляем репо докера с ключом:
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add - 
+add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+# ставим пакетики докера:
+apt update && apt-get install -y \
+          containerd.io=1.2.13-1 \
+          docker-ce=5:19.03.8~3-0~ubuntu-$(lsb_release -cs) \
+          docker-ce-cli=5:19.03.8~3-0~ubuntu-$(lsb_release -cs)
+# настраиваем конфиг докер демона:
+cat > /etc/docker/daemon.json <<EOF
+{
+    "exec-opts": ["native.cgroupdriver=systemd"],
+    "log-driver": "json-file",
+    "log-opts": {
+        "max-size": "100m"
+     },
+    "storage-driver": "overlay2"
+}
+EOF
+# создаем сервис и перезапускаем докер:
+mkdir -p /etc/systemd/system/docker.service.d && systemctl daemon-reload && systemctl restart docker
+```
+
+ - Установливаем kubeadm, kubelet and kubectl на все ноды
+
+```
+# добавляем реп кубера и его ключ:
+curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -
+cat <<EOF > /etc/apt/sources.list.d/kubernetes.list
+deb https://apt.kubernetes.io/ kubernetes-xenial main
+EOF
+# ставим основные пакеты:
+apt update && apt install -y kubelet=1.17.4-00 kubeadm=1.17.4-00 kubectl=1.17.4-00
+```
+
+ - Создаем кластер
+
+```
+# На мастер ноде выполняем:
+kubeadm init --pod-network-cidr=192.168.0.0/24
+
+Your Kubernetes control-plane has initialized successfully!
+To start using your cluster, you need to run the following as a regular user:
+
+  mkdir -p $HOME/.kube
+  sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+  sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+You should now deploy a pod network to the cluster.
+Run "kubectl apply -f [podnetwork].yaml" with one of the options listed at:
+  https://kubernetes.io/docs/concepts/cluster-administration/addons/
+
+Then you can join any number of worker nodes by running the following on each as root:
+
+kubeadm join 10.128.0.52:6443 --token o2hkf3.f3i7y8p8k8bgs60z \
+    --discovery-token-ca-cert-hash sha256:6b3d53517bcf77d590f65a5ec5ad3dcb45621f999153af048cb20425c0acb859
+
+# и далее выполняем, что предписано выше:
+# копируем конфиг kubctl:
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+# проверяем список нод:
+isie@master:~$ kubectl get nodes 
+NAME     STATUS     ROLES    AGE   VERSION
+master   NotReady   master   13m   v1.17.4
+
+#  Устанавливаем сетевой плагин:
+kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
+# мастер нода готова
+```
+
+ - Подключаем worker-ноды
+
+```
+# берем команду из вывода выше и выполняем на каждой worker ноде:
+kubeadm join 10.128.0.52:6443 --token o2hkf3.f3i7y8p8k8bgs60z \
+    --discovery-token-ca-cert-hash sha256:6b3d53517bcf77d590f65a5ec5ad3dcb45621f999153af048cb20425c0acb859 
+
+# проверяем:
+isie@master:~$ kubectl get nodes
+NAME      STATUS   ROLES    AGE   VERSION
+master    Ready    master   19m   v1.17.4
+worker0   Ready    <none>   48s   v1.17.4
+worker1   Ready    <none>   41s   v1.17.4
+worker2   Ready    <none>   22s   v1.17.4
+
+# кластер готов
+```
+
+ - Запуск нагрузки. Для демонстрации работы кластера запустим nginx.
+
+```
+# создаем deployment.yaml со следующим содержимым:
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+  replicas: 4
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.17.2
+        ports:
+        - containerPort: 80
+
+# применяем
+kubectl apply -f deployment.yaml
+
+# и проверяем:
+isie@master:~$ kubectl get pod
+NAME                               READY   STATUS    RESTARTS   AGE
+nginx-deployment-c8fd555cc-24brm   1/1     Running   0          68s
+nginx-deployment-c8fd555cc-82p5w   1/1     Running   0          68s
+nginx-deployment-c8fd555cc-bnzhp   1/1     Running   0          68s
+nginx-deployment-c8fd555cc-q78rl   1/1     Running   0          68s
+```
+
+ - Обновление кластера. Так как кластер мы разворачивали с помощью kubeadm, то и производить обновление будем с помощью него. Обновлять ноды будем по очереди. Допускается, отставание версий worker-нод от master, но не наоборот.
+ - Обновляем пакеты на мастере:
+```
+# на мастере:
+apt update && apt-get install -y kubeadm=1.18.0-00 kubelet=1.18.0-00 kubectl=1.18.0-00
+
+# в результате имеем:
+isie@master:~$ kubectl get nodes
+NAME      STATUS   ROLES    AGE     VERSION
+master    Ready    master   25m     v1.18.0
+worker0   Ready    <none>   7m17s   v1.17.4
+worker1   Ready    <none>   7m10s   v1.17.4
+worker2   Ready    <none>   6m51s   v1.17.4
+```
+
+ - Проверяем версии компонентов кубера:
+
+<details>
+
+```
+isie@master:~$ kubeadm version 
+kubeadm version: &version.Info{Major:"1", Minor:"18", GitVersion:"v1.18.0", GitCommit:"9e991415386e4cf155a24b1da15becaa390438d8", GitTreeState:"clean", BuildDate:"2020-03-25T14:56:30Z", GoVersion:"go1.13.8", Compiler:"gc", Platform:"linux/amd64"}
+
+isie@master:~$ kubelet --version
+Kubernetes v1.18.0
+
+isie@master:~$ kubectl version
+Client Version: version.Info{Major:"1", Minor:"18", GitVersion:"v1.18.0", GitCommit:"9e991415386e4cf155a24b1da15becaa390438d8", GitTreeState:"clean", BuildDate:"2020-03-25T14:58:59Z", GoVersion:"go1.13.8", Compiler:"gc", Platform:"linux/amd64"}
+Server Version: version.Info{Major:"1", Minor:"17", GitVersion:"v1.17.17", GitCommit:"f3abc15296f3a3f54e4ee42e830c61047b13895f", GitTreeState:"clean", BuildDate:"2021-01-13T13:13:00Z", GoVersion:"go1.13.15", Compiler:"gc", Platform:"linux/amd64"}
+
+isie@master:~$ kubectl describe pod kube-apiserver-master -n kube-system
+Name:                 kube-apiserver-master
+Namespace:            kube-system
+Priority:             2000000000
+Priority Class Name:  system-cluster-critical
+Node:                 master/10.128.0.52
+Start Time:           Sat, 27 Mar 2021 12:01:49 +0000
+Labels:               component=kube-apiserver
+                      tier=control-plane
+Annotations:          kubernetes.io/config.hash: b21436f00339a59973062a9e772ff5f1
+                      kubernetes.io/config.mirror: b21436f00339a59973062a9e772ff5f1
+                      kubernetes.io/config.seen: 2021-03-27T12:26:50.79491722Z
+                      kubernetes.io/config.source: file
+Status:               Running
+IP:                   10.128.0.52
+IPs:
+  IP:           10.128.0.52
+Controlled By:  Node/master
+Containers:
+  kube-apiserver:
+    Container ID:  docker://ccedc1018468c0ae676c4acbafe92425fca530e2f88e3948bd5bcc3331a26995
+    Image:         k8s.gcr.io/kube-apiserver:v1.17.17
+    Image ID:      docker-pullable://k8s.gcr.io/kube-apiserver@sha256:71344dfb6a804ff6b2c8bf5f72b1f7941ddee1fbff7369836339a79387aa071a
+    Port:          <none>
+    Host Port:     <none>
+    Command:
+      kube-apiserver
+      --advertise-address=10.128.0.52
+      --allow-privileged=true
+      --authorization-mode=Node,RBAC
+      --client-ca-file=/etc/kubernetes/pki/ca.crt
+      --enable-admission-plugins=NodeRestriction
+      --enable-bootstrap-token-auth=true
+      --etcd-cafile=/etc/kubernetes/pki/etcd/ca.crt
+      --etcd-certfile=/etc/kubernetes/pki/apiserver-etcd-client.crt
+      --etcd-keyfile=/etc/kubernetes/pki/apiserver-etcd-client.key
+      --etcd-servers=https://127.0.0.1:2379
+      --insecure-port=0
+      --kubelet-client-certificate=/etc/kubernetes/pki/apiserver-kubelet-client.crt
+      --kubelet-client-key=/etc/kubernetes/pki/apiserver-kubelet-client.key
+      --kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname
+      --proxy-client-cert-file=/etc/kubernetes/pki/front-proxy-client.crt
+      --proxy-client-key-file=/etc/kubernetes/pki/front-proxy-client.key
+      --requestheader-allowed-names=front-proxy-client
+      --requestheader-client-ca-file=/etc/kubernetes/pki/front-proxy-ca.crt
+      --requestheader-extra-headers-prefix=X-Remote-Extra-
+      --requestheader-group-headers=X-Remote-Group
+      --requestheader-username-headers=X-Remote-User
+      --secure-port=6443
+      --service-account-key-file=/etc/kubernetes/pki/sa.pub
+      --service-cluster-ip-range=10.96.0.0/12
+      --tls-cert-file=/etc/kubernetes/pki/apiserver.crt
+      --tls-private-key-file=/etc/kubernetes/pki/apiserver.key
+    State:          Running
+      Started:      Sat, 27 Mar 2021 12:26:55 +0000
+    Ready:          True
+    Restart Count:  0
+    Requests:
+      cpu:        250m
+    Liveness:     http-get https://10.128.0.52:6443/healthz delay=15s timeout=15s period=10s #success=1 #failure=8
+    Environment:  <none>
+    Mounts:
+      /etc/ca-certificates from etc-ca-certificates (ro)
+      /etc/kubernetes/pki from k8s-certs (ro)
+      /etc/ssl/certs from ca-certs (ro)
+      /usr/local/share/ca-certificates from usr-local-share-ca-certificates (ro)
+      /usr/share/ca-certificates from usr-share-ca-certificates (ro)
+Conditions:
+  Type              Status
+  Initialized       True 
+  Ready             True 
+  ContainersReady   True 
+  PodScheduled      True 
+Volumes:
+  ca-certs:
+    Type:          HostPath (bare host directory volume)
+    Path:          /etc/ssl/certs
+    HostPathType:  DirectoryOrCreate
+  etc-ca-certificates:
+    Type:          HostPath (bare host directory volume)
+    Path:          /etc/ca-certificates
+    HostPathType:  DirectoryOrCreate
+  k8s-certs:
+    Type:          HostPath (bare host directory volume)
+    Path:          /etc/kubernetes/pki
+    HostPathType:  DirectoryOrCreate
+  usr-local-share-ca-certificates:
+    Type:          HostPath (bare host directory volume)
+    Path:          /usr/local/share/ca-certificates
+    HostPathType:  DirectoryOrCreate
+  usr-share-ca-certificates:
+    Type:          HostPath (bare host directory volume)
+    Path:          /usr/share/ca-certificates
+    HostPathType:  DirectoryOrCreate
+QoS Class:         Burstable
+Node-Selectors:    <none>
+Tolerations:       :NoExecute
+Events:
+  Type    Reason   Age    From             Message
+  ----    ------   ----   ----             -------
+  Normal  Pulled   3m12s  kubelet, master  Container image "k8s.gcr.io/kube-apiserver:v1.17.17" already present on machine
+  Normal  Created  3m11s  kubelet, master  Created container kube-apiserver
+  Normal  Started  3m11s  kubelet, master  Started container kube-apiserver
+```
+</details>
+
+ - Обновим остальные компоненты кластера
+
+```
+# просмотр изменений, которые собирает сделать kubeadm
+root@master:~# kubeadm upgrade plan
+[upgrade/config] Making sure the configuration is correct:
+[upgrade/config] Reading configuration from the cluster...
+[upgrade/config] FYI: You can look at this config file with 'kubectl -n kube-system get cm kubeadm-config -oyaml'
+[preflight] Running pre-flight checks.
+[upgrade] Running cluster health checks
+[upgrade] Fetching available versions to upgrade to
+[upgrade/versions] Cluster version: v1.17.17
+[upgrade/versions] kubeadm version: v1.18.0
+I0327 12:31:49.451080   29852 version.go:252] remote version is much newer: v1.20.5; falling back to: stable-1.18
+[upgrade/versions] Latest stable version: v1.18.17
+[upgrade/versions] Latest stable version: v1.18.17
+[upgrade/versions] Latest version in the v1.17 series: v1.17.17
+[upgrade/versions] Latest version in the v1.17 series: v1.17.17
+
+Components that must be upgraded manually after you have upgraded the control plane with 'kubeadm upgrade apply':
+COMPONENT   CURRENT       AVAILABLE
+Kubelet     3 x v1.17.4   v1.18.17
+            1 x v1.18.0   v1.18.17
+
+Upgrade to the latest stable version:
+COMPONENT            CURRENT    AVAILABLE
+API Server           v1.17.17   v1.18.17
+Controller Manager   v1.17.17   v1.18.17
+Scheduler            v1.17.17   v1.18.17
+Kube Proxy           v1.17.17   v1.18.17
+CoreDNS              1.6.5      1.6.7
+Etcd                 3.4.3      3.4.3-0
+
+You can now apply the upgrade by executing the following command:
+    kubeadm upgrade apply v1.18.17
+Note: Before you can perform this upgrade, you have to update kubeadm to v1.18.17.
+
+# применение изменений
+kubeadm upgrade apply v1.18.0
+...
+[upgrade/successful] SUCCESS! Your cluster was upgraded to "v1.18.0". Enjoy!
+[upgrade/kubelet] Now that your control plane is upgraded, please proceed with upgrading your kubelets if you haven't already done so.
+
+# проверяем ноды:
+isie@master:~$ kubectl get nodes
+NAME      STATUS   ROLES    AGE   VERSION
+master    Ready    master   32m   v1.18.0
+worker0   Ready    <none>   14m   v1.17.4
+worker1   Ready    <none>   14m   v1.17.4
+worker2   Ready    <none>   13m   v1.17.4
+```
+
+ - повторно проверяем версии компонент:
+
+```
+isie@master:~$ kubeadm version
+kubeadm version: &version.Info{Major:"1", Minor:"18", GitVersion:"v1.18.0", GitCommit:"9e991415386e4cf155a24b1da15becaa390438d8", GitTreeState:"clean", BuildDate:"2020-03-25T14:56:30Z", GoVersion:"go1.13.8", Compiler:"gc", Platform:"linux/amd64"}
+
+isie@master:~$ kubelet --version
+Kubernetes v1.18.0
+
+# видим ниже что версия сервера обновилась:
+isie@master:~$ kubectl version
+Client Version: version.Info{Major:"1", Minor:"18", GitVersion:"v1.18.0", GitCommit:"9e991415386e4cf155a24b1da15becaa390438d8", GitTreeState:"clean", BuildDate:"2020-03-25T14:58:59Z", GoVersion:"go1.13.8", Compiler:"gc", Platform:"linux/amd64"}
+Server Version: version.Info{Major:"1", Minor:"18", GitVersion:"v1.18.0", GitCommit:"9e991415386e4cf155a24b1da15becaa390438d8", GitTreeState:"clean", BuildDate:"2020-03-25T14:50:46Z", GoVersion:"go1.13.8", Compiler:"gc", Platform:"linux/amd64"}
+
+# как и образ apiserver
+isie@master:~$ kubectl describe pod kube-apiserver-master -n kube-system | grep Image:
+Image:         k8s.gcr.io/kube-apiserver:v1.18.0
+```
+
+ - обновляем worker-ноды, для этого сначала выодим их из нагрузки:
+
+```
+# выводим добавляя флаг игнорирования daemonset
+isie@master:~$ kubectl drain worker0 --ignore-daemonsets
+node/worker0 cordoned
+WARNING: ignoring DaemonSet-managed Pods: kube-system/calico-node-wc5zq, kube-system/kube-proxy-xwlcm
+evicting pod default/nginx-deployment-c8fd555cc-24brm
+evicting pod kube-system/coredns-66bff467f8-lzs5l
+pod/coredns-66bff467f8-lzs5l evicted
+pod/nginx-deployment-c8fd555cc-24brm evicted
+node/worker0 evicted
+
+# смотрим что стало с нодой: добавился флаг shedulingdisabled
+isie@master:~$ kubectl get nodes
+NAME      STATUS                     ROLES    AGE   VERSION
+master    Ready                      master   35m   v1.18.0
+worker0   Ready,SchedulingDisabled   <none>   17m   v1.17.4
+worker1   Ready                      <none>   17m   v1.17.4
+worker2   Ready                      <none>   16m   v1.17.4
+
+# и далее на worker-ноде обновляем пакетики и рестартуем kubelet:
+apt install -y kubelet=1.18.0-00 kubeadm=1.18.0-00
+systemctl restart kubelet
+
+# выпускаем ноду в нагрузку:
+kubectl uncordon worker0
+
+# проверяем статус:
+isie@master:~$ kubectl get nodes
+NAME      STATUS   ROLES    AGE   VERSION
+master    Ready    master   37m   v1.18.0
+worker0   Ready    <none>   19m   v1.18.0
+worker1   Ready    <none>   19m   v1.17.4
+worker2   Ready    <none>   19m   v1.17.4
+```
+
+ - обновляем аналогичны образом оставшиеся ноды (команды аналогичные, проверяем результат)
+
+```
+isie@master:~$ kubectl get nodes
+NAME      STATUS   ROLES    AGE   VERSION
+master    Ready    master   40m   v1.18.0
+worker0   Ready    <none>   21m   v1.18.0
+worker1   Ready    <none>   21m   v1.18.0
+worker2   Ready    <none>   21m   v1.18.0
+```
+
+#### Автоматическое развертывание кластеров
+
+ - Рассмотрим инструмент для автоматического развертывания кластеров - Kubespray - это Ansible playbook для установки Kubernetes. https://github.com/kubernetes-sigs/kubespray
+ - Подготовим машинки в gcp (возьмем сразу под задание со * - 3 мастера и 2 воркера)
+
+```
+# создаем машинки - одна в другой зоне, ибо ограничение у gcp в бесплатном акке на 4 машины
+gcloud compute instances create master0 --zone=europe-central2-a --image-project=ubuntu-os-cloud --image-family=ubuntu-minimal-1804-lts --machine-type=n1-standard-1
+gcloud compute instances create master1 --zone=europe-central2-a --image-project=ubuntu-os-cloud --image-family=ubuntu-minimal-1804-lts --machine-type=n1-standard-1
+gcloud compute instances create master2 --zone=europe-central2-a --image-project=ubuntu-os-cloud --image-family=ubuntu-minimal-1804-lts --machine-type=n1-standard-1
+gcloud compute instances create worker0 --zone=europe-central2-a --image-project=ubuntu-os-cloud --image-family=ubuntu-minimal-1804-lts --machine-type=n1-standard-1
+gcloud compute instances create worker1 --zone=us-central1-c --image-project=ubuntu-os-cloud --image-family=ubuntu-minimal-1804-lts --machine-type=n1-standard-1
+
+# запомним их внешние и внутренние ip (34* - это внешние)
+master0  europe-central2-a  n1-standard-1               10.186.0.2   34.116.183.15  RUNNING
+master1  europe-central2-a  n1-standard-1               10.186.0.3   34.118.86.80  RUNNING
+master2  europe-central2-a  n1-standard-1               10.186.0.4   34.118.121.171  RUNNING
+worker0  europe-central2-a  n1-standard-1               10.186.0.5   34.116.169.193  RUNNING
+worker1  us-central1-c  n1-standard-1               10.128.0.60  34.72.0.77   RUNNING
+
+# подключимся к машинкам: эта команда сразу добавляет ключик в .ssh - им мы воспользуемся для kubespray
+gcloud beta compute ssh --zone "europe-central2-a" "master0" --project "mytest-302917"
+gcloud beta compute ssh --zone "europe-central2-a" "master1" --project "mytest-302917"
+gcloud beta compute ssh --zone "europe-central2-a" "master2" --project "mytest-302917"
+gcloud beta compute ssh --zone "europe-central2-a" "worker0" --project "mytest-302917"
+gcloud beta compute ssh --zone "us-central1-c" "worker1" --project "mytest-302917"
+```
+
+ - Установим kubespray
+
+```
+# получение kubespray
+git clone https://github.com/kubernetes-sigs/kubespray.git
+# далее убаждаемся что ansible-playbook точно использует python3, проверить можно через ansible-playbook --version, т.к. на python2 kubespray не запустится
+# установка зависимостей:
+sudo pip install -r requirements.txt
+# копирование примера конфига в отдельную директорию
+cp -rfp inventory/sample inventory/mycluster
+```
+
+ - Подготавливаем inventory - см правленный в каталоге kubernetes-production/inventory.ini Синтаксис очевидный, "заводских" комментариев достаточно для понимания.
+ - Запускаем установку из корня каталога с клонированным репо kubespray и откидываемся на спинку кресла(минут на 16-20):
+
+```
+ansible-playbook -i inventory/mycluster/inventory.ini --become --become-user=root \
+    --user=isie --key-file="~/.ssh/google_compute_engine" cluster.yml
+```
+
+ - Проверяем кластер, подключаемся к мастер ноде и из под root-а запрашиваем список нод:
+
+```
+root@master0:~# kubectl get nodes
+NAME      STATUS   ROLES                  AGE     VERSION
+master0   Ready    control-plane,master   5m47s   v1.20.5
+master1   Ready    control-plane,master   5m22s   v1.20.5
+master2   Ready    control-plane,master   5m12s   v1.20.5
+worker0   Ready    <none>                 3m58s   v1.20.5
+worker1   Ready    <none>                 3m49s   v1.20.5
+
+# + список подов
+root@master0:~# kubectl get pods -n kube-system -o wide
+NAME                                    READY   STATUS    RESTARTS   AGE     IP             NODE      NOMINATED NODE   READINESS GATES
+calico-kube-controllers-995b884-4p4m7   1/1     Running   0          3m20s   10.128.0.60    worker1   <none>           <none>
+calico-node-79q5n                       1/1     Running   0          4m3s    10.186.0.4     master2   <none>           <none>
+calico-node-96q85                       1/1     Running   0          4m4s    10.186.0.3     master1   <none>           <none>
+calico-node-d7s5s                       1/1     Running   0          4m4s    10.186.0.2     master0   <none>           <none>
+calico-node-t4d5j                       1/1     Running   0          4m3s    10.128.0.60    worker1   <none>           <none>
+calico-node-xrxzx                       1/1     Running   0          4m4s    10.186.0.5     worker0   <none>           <none>
+coredns-657959df74-dh62d                1/1     Running   0          2m36s   10.233.113.1   worker0   <none>           <none>
+coredns-657959df74-mt47s                1/1     Running   0          2m23s   10.233.110.2   worker1   <none>           <none>
+dns-autoscaler-b5c786945-pxf2p          1/1     Running   0          2m30s   10.233.110.1   worker1   <none>           <none>
+kube-apiserver-master0                  1/1     Running   0          6m39s   10.186.0.2     master0   <none>           <none>
+kube-apiserver-master1                  1/1     Running   0          6m18s   10.186.0.3     master1   <none>           <none>
+kube-apiserver-master2                  1/1     Running   0          6m7s    10.186.0.4     master2   <none>           <none>
+kube-controller-manager-master0         1/1     Running   0          6m39s   10.186.0.2     master0   <none>           <none>
+kube-controller-manager-master1         1/1     Running   0          6m18s   10.186.0.3     master1   <none>           <none>
+kube-controller-manager-master2         1/1     Running   0          6m7s    10.186.0.4     master2   <none>           <none>
+kube-proxy-54g2f                        1/1     Running   0          4m42s   10.186.0.4     master2   <none>           <none>
+kube-proxy-7xgcw                        1/1     Running   0          4m41s   10.186.0.5     worker0   <none>           <none>
+kube-proxy-sk297                        1/1     Running   0          4m41s   10.186.0.2     master0   <none>           <none>
+kube-proxy-sn8pm                        1/1     Running   0          4m42s   10.186.0.3     master1   <none>           <none>
+kube-proxy-tgx9k                        1/1     Running   0          4m42s   10.128.0.60    worker1   <none>           <none>
+kube-scheduler-master0                  1/1     Running   1          6m39s   10.186.0.2     master0   <none>           <none>
+kube-scheduler-master1                  1/1     Running   0          6m18s   10.186.0.3     master1   <none>           <none>
+kube-scheduler-master2                  1/1     Running   1          6m7s    10.186.0.4     master2   <none>           <none>
+nginx-proxy-worker0                     1/1     Running   0          4m54s   10.186.0.5     worker0   <none>           <none>
+nginx-proxy-worker1                     1/1     Running   0          4m45s   10.128.0.60    worker1   <none>           <none>
+nodelocaldns-548hz                      1/1     Running   0          2m28s   10.186.0.5     worker0   <none>           <none>
+nodelocaldns-7lngj                      1/1     Running   0          2m28s   10.186.0.3     master1   <none>           <none>
+nodelocaldns-b59n6                      1/1     Running   0          2m28s   10.186.0.4     master2   <none>           <none>
+nodelocaldns-dsp5p                      1/1     Running   0          2m28s   10.128.0.60    worker1   <none>           <none>
+nodelocaldns-gkgkz                      1/1     Running   0          2m28s   10.186.0.2     master0   <none>           <none>
+```
+
+### Задание со *
+
+>Выполните установку кластера с 3 master-нодами и 2 worker-нодами, можно использовать kubeadm или любой другой способ установки kubernetes.
+
+Задание выполнено самым читерским способом через kubespray сразу в задании с kubespray - т.к. разница особо не велика - главное нужным образом раскидать сервера по соответствующим ролям в ansible inventory.
+
+
+</details>
+
